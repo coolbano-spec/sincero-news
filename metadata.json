@@ -1,0 +1,6 @@
+{
+  "name": "Sincero News",
+  "description": "Agregador de notícias em tempo real simples, rápido e elegante, focado em política, economia, tecnologia, mundo, eleições, governo, congresso e STF.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
