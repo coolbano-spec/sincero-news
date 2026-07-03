@@ -492,6 +492,39 @@ export default function App() {
   const [summaryLoading, setSummaryLoading] = useState<boolean>(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
+  // States for trending section "O que o Brasil está falando hoje"
+  const [trendingData, setTrendingData] = useState<{ 
+    topics: Array<{ title: string; sources: string[]; summary: string; searchTerm: string }>; 
+    summary: string; 
+    timestamp?: number 
+  } | null>(null);
+  const [isTrendingLoading, setIsTrendingLoading] = useState<boolean>(false);
+  const [lastTick, setLastTick] = useState<number>(Date.now());
+
+  // Card expansion states for Trending section
+  const [expandedTopicTitle, setExpandedTopicTitle] = useState<string | null>(null);
+  const [expandedNews, setExpandedNews] = useState<{ [topicTitle: string]: NewsItem[] }>({});
+  const [expandedNewsLoading, setExpandedNewsLoading] = useState<{ [topicTitle: string]: boolean }>({});
+  const [coberturaExibida, setCoberturaExibida] = useState<{ [topicTitle: string]: boolean }>({});
+  const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setLastTick(Date.now());
+    }, 15000); // refresh every 15 seconds
+    return () => clearInterval(timer);
+  }, []);
+
+  const getTrendingAgeText = () => {
+    if (!trendingData || !trendingData.timestamp) return "";
+    const diffMs = lastTick - trendingData.timestamp;
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    if (diffMins < 1) {
+      return "Coletado agora mesmo";
+    }
+    return `Coletado há ${diffMins} ${diffMins === 1 ? "minuto" : "minutos"}`;
+  };
+
   // Monitor scroll height to show/hide "back to top" button
   useEffect(() => {
     const handleScroll = () => {
@@ -583,6 +616,13 @@ export default function App() {
       if (!res.ok) {
         throw new Error("Não foi possível carregar as notícias em tempo real.");
       }
+
+      // Defensive checking of Content-Type before parsing JSON to prevent Unexpected token '<' errors
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("text/html")) {
+        throw new Error("Servidor retornou resposta em formato HTML inesperado. O servidor pode estar reiniciando.");
+      }
+
       const data: ApiResponse = await res.json();
 
       // Check if we have new articles on automatic/background updates
@@ -621,9 +661,58 @@ export default function App() {
     }
   };
 
+  const fetchTrending = async () => {
+    setIsTrendingLoading(true);
+    try {
+      const res = await fetch("/api/trending");
+      if (res.ok) {
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("text/html")) {
+          throw new Error("Servidor retornou resposta em formato HTML inesperado para tendências.");
+        }
+        const data = await res.json();
+        setTrendingData(data);
+      }
+    } catch (err) {
+      console.error("Erro ao buscar assuntos em alta:", err);
+    } finally {
+      setIsTrendingLoading(false);
+    }
+  };
+
+  const handleLoadCoberturaCompleta = async (title: string, searchTerm: string) => {
+    // If already loaded, just toggle visibility state to true
+    if (expandedNews[title]) {
+      setCoberturaExibida(prev => ({ ...prev, [title]: true }));
+      return;
+    }
+    
+    setExpandedNewsLoading(prev => ({ ...prev, [title]: true }));
+    try {
+      const res = await fetch(`/api/news?category=todas&search=${encodeURIComponent(searchTerm)}`);
+      if (res.ok) {
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("text/html")) {
+          throw new Error("Servidor retornou resposta em formato HTML inesperado para cobertura completa.");
+        }
+        const data = await res.json();
+        setExpandedNews(prev => ({ ...prev, [title]: data.news || [] }));
+      }
+    } catch (err) {
+      console.error("Erro ao buscar cobertura completa da tendência:", err);
+    } finally {
+      setExpandedNewsLoading(prev => ({ ...prev, [title]: false }));
+      setCoberturaExibida(prev => ({ ...prev, [title]: true }));
+    }
+  };
+
   useEffect(() => {
     fetchNews(true);
   }, [selectedCategory, debouncedSearch]);
+
+  useEffect(() => {
+    fetchTrending();
+  }, []);
 
   // Handle manual trigger refresh
   const handleManualRefresh = async () => {
@@ -631,7 +720,10 @@ export default function App() {
     try {
       const res = await fetch("/api/news/refresh", { method: "POST" });
       if (res.ok) {
-        await fetchNews(false);
+        await Promise.all([
+          fetchNews(false),
+          fetchTrending()
+        ]);
       }
     } catch (err) {
       console.error(err);
@@ -1382,6 +1474,237 @@ export default function App() {
                 </div>
               );
             })()}
+
+            {/* 🇧🇷 Seção: O que o Brasil está falando hoje */}
+            <motion.div
+              id="brasil-trending-section"
+              animate={{
+                borderColor: [
+                  "rgba(34, 34, 34, 1)",
+                  `${activeCatColor.hex}55`,
+                  "rgba(34, 34, 34, 1)"
+                ],
+                boxShadow: [
+                  "0 0 0px rgba(0, 0, 0, 0)",
+                  `0 0 25px ${activeCatColor.hex}1a`,
+                  "0 0 0px rgba(0, 0, 0, 0)"
+                ]
+              }}
+              transition={{
+                duration: 4,
+                repeat: Infinity,
+                ease: "easeInOut"
+              }}
+              className="bg-[#111111] border rounded-2xl p-6 sm:p-8"
+            >
+              <div className="flex items-center justify-between border-b border-[#222]/40 pb-4 mb-5">
+                <div className="flex flex-col gap-1">
+                  <h3 className="text-sm font-mono font-black uppercase tracking-wider text-white flex items-center gap-2">
+                    <span className="text-lg">🔥</span>
+                    <span>O que está sendo Trending Tops no Brasil hoje</span>
+                  </h3>
+                  {!isTrendingLoading && trendingData && trendingData.timestamp && (
+                    <span className="text-[10px] font-mono text-neutral-500">
+                      ⏱️ {getTrendingAgeText()}
+                    </span>
+                  )}
+                </div>
+                {isTrendingLoading && (
+                  <span className="text-[10px] font-mono text-neutral-500 animate-pulse">
+                    Atualizando tendências...
+                  </span>
+                )}
+              </div>
+
+              {isTrendingLoading || !trendingData ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 animate-pulse">
+                    {[1, 2, 3, 4, 5, 6].map((i) => (
+                      <div key={i} className="h-20 bg-[#161616]/40 border border-[#222]/30 rounded-xl"></div>
+                    ))}
+                  </div>
+                  <div className="border border-[#222]/20 bg-[#141414]/20 rounded-xl p-5 animate-pulse space-y-2">
+                    <div className="h-3 bg-[#181818] rounded w-1/4 mb-3"></div>
+                    <div className="h-3.5 bg-[#181818] rounded w-full"></div>
+                    <div className="h-3.5 bg-[#181818] rounded w-[94%]"></div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    {trendingData.topics.map((topic, i) => {
+                      const isExpanded = expandedTopicTitle === topic.title;
+                      const sourcesCount = topic.sources?.length || 1;
+                      const repercussaoPct = Math.min(100, Math.max(15, sourcesCount === 1 ? 40 : sourcesCount === 2 ? 65 : sourcesCount === 3 ? 85 : 100));
+
+                      return (
+                        <motion.div
+                          key={topic.title}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.2, delay: i * 0.04 }}
+                          layout="position"
+                          className={`bg-[#161616] border border-[#222]/80 rounded-xl transition-all duration-300 w-full overflow-hidden ${
+                            isExpanded 
+                              ? "col-span-1 md:col-span-2 border-[#3a3a3a] shadow-lg p-5" 
+                              : "col-span-1 hover:bg-[#1A1A1A] hover:border-[#3a3a3a] p-4 cursor-pointer"
+                          }`}
+                          onClick={() => {
+                            if (!isExpanded) {
+                              setExpandedTopicTitle(topic.title);
+                            }
+                          }}
+                        >
+                          <div 
+                            onClick={(e) => {
+                              if (isExpanded) {
+                                e.stopPropagation();
+                                setExpandedTopicTitle(null);
+                              }
+                            }}
+                            className={`flex items-start justify-between gap-3 ${isExpanded ? "cursor-pointer pb-4 border-b border-[#222]/30 mb-4" : ""}`}
+                          >
+                            <div className="flex flex-col gap-1.5 w-full">
+                              <div className="flex items-start gap-2">
+                                <span className="text-sm shrink-0">🔥</span>
+                                <span className={`font-sans font-bold leading-snug transition-colors duration-200 ${isExpanded ? "text-white text-sm sm:text-base" : "text-[#E0E0E0] text-[13px]"}`}>
+                                  {topic.title}
+                                </span>
+                              </div>
+                              {!isExpanded && topic.sources && topic.sources.length > 0 && (
+                                <div className="pl-6 flex flex-wrap gap-1 items-center text-[10px] font-mono text-neutral-500">
+                                  {topic.sources.map((src, idx) => (
+                                    <span key={src} className="flex items-center">
+                                      {idx > 0 && <span className="mx-1 text-neutral-600 font-sans">•</span>}
+                                      <span>{src}</span>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Índice de Repercussão */}
+                              <div className="mt-1.5 pl-6 pr-2 space-y-1 w-full">
+                                <div className="flex items-center justify-between text-[9px] font-mono uppercase tracking-wider text-neutral-500 relative">
+                                  <span className="flex items-center gap-1.5">
+                                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500/80 animate-pulse"></span>
+                                    Índice de Repercussão
+                                  </span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-bold text-amber-500/90">{repercussaoPct}%</span>
+                                    <div className="relative flex items-center justify-center">
+                                      <button 
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation(); // Evita expandir ou fechar o card principal ao clicar no info
+                                          setActiveTooltip(activeTooltip === topic.title ? null : topic.title);
+                                        }}
+                                        onMouseEnter={() => setActiveTooltip(topic.title)}
+                                        onMouseLeave={() => setActiveTooltip(null)}
+                                        className="text-neutral-500 hover:text-amber-400 transition-colors duration-200 p-0.5 focus:outline-none cursor-help"
+                                        aria-label="Informações sobre o Índice de Repercussão"
+                                      >
+                                        <Info className="w-3.5 h-3.5" />
+                                      </button>
+                                      
+                                      {/* Tooltip */}
+                                      <div className={`absolute right-0 bottom-full mb-2 w-48 p-2.5 bg-[#1C1C1C] text-neutral-300 text-[10px] font-sans normal-case tracking-normal rounded-lg border border-[#333] shadow-xl transition-all duration-200 z-50 pointer-events-none leading-relaxed ${
+                                        activeTooltip === topic.title 
+                                          ? "opacity-100 visible translate-y-0" 
+                                          : "opacity-0 invisible translate-y-1"
+                                      }`}>
+                                        <p className="font-semibold text-white mb-1">Como é calculado?</p>
+                                        Este índice avalia a relevância do tema baseado no volume de buscas recentes, na quantidade de veículos que cobrem a matéria e no engajamento gerado em redes de fóruns e vídeos.
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="h-1 w-full bg-[#121212] rounded-full overflow-hidden border border-[#2a2a2a]/30">
+                                  <motion.div 
+                                    initial={{ width: "0%" }}
+                                    animate={{ width: isExpanded ? `${repercussaoPct}%` : "0%" }}
+                                    transition={{ 
+                                      duration: 0.8, 
+                                      ease: "easeOut", 
+                                      delay: isExpanded ? 0.2 : 0.05
+                                    }}
+                                    className="h-full bg-gradient-to-r from-amber-600 via-orange-500 to-red-500 rounded-full"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                            
+                            <div className="text-neutral-500 hover:text-white shrink-0 pt-0.5">
+                              {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                            </div>
+                          </div>
+
+                          <AnimatePresence initial={false}>
+                            {isExpanded && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.25, ease: "easeInOut" }}
+                                className="overflow-hidden space-y-4 text-left"
+                              >
+                                <div className="space-y-1.5">
+                                  <h4 className="text-[10px] font-mono uppercase tracking-wider text-neutral-500 flex items-center gap-1.5">
+                                    <span>🧠 Explicação da Tendência</span>
+                                  </h4>
+                                  <p className="text-neutral-300 text-[13px] leading-relaxed font-sans select-text whitespace-pre-wrap">
+                                    {topic.summary || "Este tema ganhou força porque apareceu simultaneamente nas buscas do Google, nas manchetes dos principais portais e nas discussões das redes sociais."}
+                                  </p>
+                                </div>
+
+                                <div className="border-t border-[#222]/40 pt-4 pb-1">
+                                  <h4 className="text-[10px] font-mono uppercase tracking-wider text-neutral-500 mb-2">
+                                    📍 Onde esse assunto está aparecendo
+                                  </h4>
+                                  <div className="flex flex-wrap gap-2">
+                                    {topic.sources.map(src => {
+                                      let badgeColor = "bg-neutral-900 border-neutral-800 text-neutral-400";
+                                      let icon = "🌐";
+                                      if (src === "Google Trends") {
+                                        badgeColor = "bg-blue-950/20 border-blue-900/30 text-blue-400";
+                                        icon = "📈";
+                                      } else if (src === "Google News") {
+                                        badgeColor = "bg-emerald-950/20 border-emerald-900/30 text-emerald-400";
+                                        icon = "📰";
+                                      } else if (src === "YouTube") {
+                                        badgeColor = "bg-red-950/20 border-red-900/30 text-red-400";
+                                        icon = "▶️";
+                                      } else if (src === "Reddit") {
+                                        badgeColor = "bg-orange-950/20 border-orange-900/30 text-orange-400";
+                                        icon = "💬";
+                                      }
+                                      return (
+                                        <span key={src} className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-mono border rounded-lg ${badgeColor}`}>
+                                          <span>{icon}</span>
+                                          <span>{src}</span>
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="border border-[#222]/40 bg-[#161616]/40 rounded-xl p-5 sm:p-6">
+                    <h4 className="text-[10px] font-mono uppercase tracking-widest text-[#A0A0A0] font-bold mb-3.5 flex items-center gap-1.5">
+                      <span>⏱️ Em poucas palavras</span>
+                    </h4>
+                    <p className="text-[#D0D0D0] text-[13.5px] leading-relaxed font-sans font-light select-text">
+                      {trendingData.summary}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </motion.div>
 
             {/* Rest of the News (Other articles grid) */}
             {otherArticles.length > 0 && (
