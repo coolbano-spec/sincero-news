@@ -1,0 +1,79 @@
+{
+  "entities": {
+    "Subscription": {
+      "title": "Subscription",
+      "description": "User subscription and access status synchronized from Cakto webhook",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "The unique Firebase Auth User ID"
+        },
+        "nome": {
+          "type": "string",
+          "description": "Full name of the subscriber"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Email address of the subscriber"
+        },
+        "plano": {
+          "type": "string",
+          "enum": ["Trimestral", "Semestral", "Anual", "Vitalício"],
+          "description": "Subscription tier selected"
+        },
+        "statusAssinatura": {
+          "type": "string",
+          "enum": ["Ativa", "Expirada", "Cancelada", "Em análise"],
+          "description": "Current status of the subscription"
+        },
+        "dataCompra": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Date of initial purchase"
+        },
+        "dataExpiracao": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Date of subscription expiration"
+        },
+        "origemCadastro": {
+          "type": "string",
+          "description": "Origin of registration (e.g. CAKTO)"
+        },
+        "ultimoPagamento": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Date of most recent payment"
+        },
+        "renovacaoAutomatica": {
+          "type": "boolean",
+          "description": "Whether the subscription renews automatically"
+        },
+        "lastUpdated": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of the last update to this record"
+        }
+      },
+      "required": [
+        "uid",
+        "nome",
+        "email",
+        "plano",
+        "statusAssinatura",
+        "dataCompra",
+        "dataExpiracao"
+      ]
+    }
+  },
+  "firestore": {
+    "/subscriptions/{userId}": {
+      "schema": {
+        "$ref": "#/entities/Subscription"
+      },
+      "description": "Stores current subscription details and access flags for each user"
+    }
+  }
+}
