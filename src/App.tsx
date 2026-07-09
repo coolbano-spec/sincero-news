@@ -933,14 +933,20 @@ export function SinceroNewsApp() {
               publicidade
             </p>
           </div>
-          <div className="w-full">
+          <a 
+            href="https://treinamento.sinceronews.com/" 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="block w-full hover:opacity-90 transition-opacity cursor-pointer"
+            id="ad-top-link"
+          >
             <img 
               src={getProxiedImageUrl("https://sinceronews.com/wp-content/uploads/2026/07/ads1.jpg")} 
               alt="Anúncio Superior" 
               className="w-full h-auto block"
               referrerPolicy="no-referrer"
             />
-          </div>
+          </a>
         </div>
 
         {/* Banner principal em largura total */}
@@ -1324,14 +1330,20 @@ export function SinceroNewsApp() {
             publicidade
           </p>
         </div>
-        <div className="w-full">
+        <a 
+          href="https://treinamento.sinceronews.com/" 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          className="block w-full hover:opacity-90 transition-opacity cursor-pointer"
+          id="ad-middle-link"
+        >
           <img 
             src={getProxiedImageUrl("https://sinceronews.com/wp-content/uploads/2026/07/ads2.jpg")} 
             alt="Publicidade" 
             className="w-full h-auto block"
             referrerPolicy="no-referrer"
           />
-        </div>
+        </a>
       </div>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">

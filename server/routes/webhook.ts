@@ -40,8 +40,49 @@ function saveSimulatedEmails(emails: SavedEmail[]) {
   }
 }
 
+// Healthcheck route for diagnostics (GET /api/health)
+router.get("/health", (req: Request, res: Response) => {
+  return res.json({
+    status: "ok",
+    server: "running"
+  });
+});
+
+// GET endpoint to prevent fallthrough/confusion when accessing via browser (GET /api/cakto-webhook)
+router.get("/cakto-webhook", (req: Request, res: Response) => {
+  return res.status(405).json({
+    success: false,
+    error: "Method Not Allowed",
+    message: "O webhook do Sincero News aceita apenas requisições POST com payloads de pagamento da CAKTO. Acesso direto pelo navegador realiza requisições GET padrão."
+  });
+});
+
 // Endpoint for receiving webhook payments from CAKTO
 router.post("/cakto-webhook", async (req: Request, res: Response) => {
+  const requestTimestamp = new Date().toISOString();
+  console.log(`\n========================================`);
+  console.log(`[CAKTO Webhook] [INFO] [${requestTimestamp}] NOVA REQUISIÇÃO RECEBIDA`);
+  console.log(`[CAKTO Webhook] Método: ${req.method}`);
+  console.log(`[CAKTO Webhook] URL: ${req.originalUrl || req.url}`);
+  
+  // Omit / mask sensitive headers
+  const sanitizedHeaders: Record<string, string> = {};
+  for (const [key, value] of Object.entries(req.headers)) {
+    const lowerKey = key.toLowerCase();
+    if (
+      lowerKey.includes("auth") || 
+      lowerKey.includes("key") || 
+      lowerKey.includes("secret") || 
+      lowerKey.includes("signature") || 
+      lowerKey.includes("cookie") ||
+      lowerKey.includes("token")
+    ) {
+      sanitizedHeaders[key] = "[REDACTED / PROTECTED]";
+    } else {
+      sanitizedHeaders[key] = Array.isArray(value) ? value.join(", ") : String(value || "");
+    }
+  }
+  console.log(`[CAKTO Webhook] Headers recebidos (seguros):`, JSON.stringify(sanitizedHeaders, null, 2));
   console.log("[CAKTO Webhook] Payload recebido:", JSON.stringify(req.body, null, 2));
 
   try {
@@ -53,7 +94,7 @@ router.post("/cakto-webhook", async (req: Request, res: Response) => {
     if (secret && !isSimulated) {
       const signature = req.headers["x-cakto-signature"] || req.headers["x-signature"] || req.headers["signature"];
       if (!signature) {
-        console.error("[CAKTO Webhook] Assinatura ausente.");
+        console.error(`[CAKTO Webhook] [ERROR] [${new Date().toISOString()}] Validação HMAC falhou: Assinatura ausente.`);
         return res.status(401).json({ success: false, message: "Webhook sem assinatura obrigatória (X-Cakto-Signature)." });
       }
 
@@ -61,14 +102,14 @@ router.post("/cakto-webhook", async (req: Request, res: Response) => {
       const computedSignature = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
 
       if (computedSignature !== signature) {
-        console.error("[CAKTO Webhook] Falha de assinatura HMAC-SHA256.", { computedSignature, signature });
+        console.error(`[CAKTO Webhook] [ERROR] [${new Date().toISOString()}] Validação HMAC falhou: Assinaturas não coincidem.`, { computedSignature, signature });
         return res.status(401).json({ success: false, message: "Assinatura do webhook inválida." });
       }
-      console.log("[CAKTO Webhook] Assinatura validada com sucesso via HMAC-SHA256!");
+      console.log(`[CAKTO Webhook] [SUCCESS] [${new Date().toISOString()}] Validação HMAC passou: Assinatura validada com sucesso via HMAC-SHA256!`);
     } else if (secret && isSimulated) {
-      console.log("[CAKTO Webhook] Ignorando verificação de assinatura para requisição simulada via sandbox.");
+      console.log(`[CAKTO Webhook] [INFO] [${new Date().toISOString()}] Ignorando verificação de assinatura para requisição simulada via sandbox.`);
     } else {
-      console.warn("[CAKTO Webhook] CAKTO_SECRET_KEY não configurado no .env. Ignorando validação estrita de assinatura para desenvolvimento.");
+      console.warn(`[CAKTO Webhook] [WARN] [${new Date().toISOString()}] CAKTO_SECRET_KEY não configurado no .env. Ignorando validação estrita de assinatura para desenvolvimento.`);
     }
 
     // 2. Extract email and name with extensive fallbacks
@@ -88,7 +129,11 @@ router.post("/cakto-webhook", async (req: Request, res: Response) => {
     email = email.trim().toLowerCase();
     nome = nome.trim();
 
+    console.log(`[CAKTO Webhook] [INFO] E-mail do comprador extraído: "${email}"`);
+    console.log(`[CAKTO Webhook] [INFO] Nome do comprador extraído: "${nome}"`);
+
     if (!email) {
+      console.error(`[CAKTO Webhook] [ERROR] E-mail do comprador não encontrado no payload.`);
       return res.status(400).json({ 
         success: false, 
         message: "E-mail do comprador não encontrado no payload do webhook." 
@@ -110,6 +155,7 @@ router.post("/cakto-webhook", async (req: Request, res: Response) => {
     } else if (planRaw.includes("trimestral") || planRaw.includes("3 meses")) {
       plano = "Trimestral";
     }
+    console.log(`[CAKTO Webhook] [INFO] Plano identificado: ${plano} (Texto original: "${planRaw}")`);
 
     // 4. Extract and parse role/user type
     let tipoUsuario: "Leitor" | "Influenciador" | "Jornalista" | "Administrador" = "Leitor";
@@ -117,11 +163,13 @@ router.post("/cakto-webhook", async (req: Request, res: Response) => {
     if (roleRaw.includes("influenciador")) tipoUsuario = "Influenciador";
     else if (roleRaw.includes("jornalista")) tipoUsuario = "Jornalista";
     else if (roleRaw.includes("administrador") || roleRaw.includes("admin")) tipoUsuario = "Administrador";
+    console.log(`[CAKTO Webhook] [INFO] Tipo de usuário (role): ${tipoUsuario} (Texto original: "${roleRaw}")`);
 
     // 5. Extract and parse status (Ativa, Expirada, Cancelada, Em análise)
     let statusAssinatura: "Ativa" | "Expirada" | "Cancelada" | "Em análise" = "Ativa";
     const eventRaw = (payload.event || payload.event_name || "").toString().toLowerCase();
     const statusRaw = (payload.status || payload.statusAssinatura || "").toString().toLowerCase();
+    console.log(`[CAKTO Webhook] [INFO] Evento CAKTO: "${eventRaw}" | Status CAKTO: "${statusRaw}"`);
     
     const isCancelOrRefund = 
       eventRaw.includes("cancel") || 
@@ -158,6 +206,7 @@ router.post("/cakto-webhook", async (req: Request, res: Response) => {
     } else {
       statusAssinatura = "Ativa";
     }
+    console.log(`[CAKTO Webhook] [INFO] Status final mapeado para assinatura: "${statusAssinatura}"`);
 
     // 6. Calculate purchase dates
     const dataCompra = new Date();
@@ -174,6 +223,7 @@ router.post("/cakto-webhook", async (req: Request, res: Response) => {
     } else if (plano === "Vitalício") {
       dataExpiracao.setFullYear(dataCompra.getFullYear() + 100);
     }
+    console.log(`[CAKTO Webhook] [INFO] Data Compra: ${dataCompra.toISOString()} | Data Expiração: ${dataExpiracao.toISOString()}`);
 
     // 7. Check if user exists or create automatically in Firebase Auth if approved
     const isApprovedPayment = statusAssinatura === "Ativa" || statusAssinatura === "Em análise";
@@ -184,36 +234,49 @@ router.post("/cakto-webhook", async (req: Request, res: Response) => {
     if (isApprovedPayment) {
       const authAdmin = adminAuth();
       try {
+        console.log(`[CAKTO Webhook] [INFO] Verificando existência do e-mail no Firebase Auth: ${email}`);
         userRecord = await authAdmin.getUserByEmail(email);
-        console.log(`[CAKTO Webhook] Usuário existente no Auth para: ${email}`);
+        console.log(`[CAKTO Webhook] [INFO] Usuário já existe no Auth para o e-mail: ${email} (UID: ${userRecord.uid})`);
       } catch (err: any) {
         if (err.code === "auth/user-not-found") {
-          userRecord = await authAdmin.createUser({
-            email,
-            displayName: nome,
-          });
-          console.log(`[CAKTO Webhook] Conta criada automaticamente no Auth para: ${email} com UID ${userRecord.uid}`);
+          console.log(`[CAKTO Webhook] [INFO] Iniciando criação automática de usuário no Firebase Auth para: ${email}`);
+          try {
+            userRecord = await authAdmin.createUser({
+              email,
+              displayName: nome,
+            });
+            console.log(`[CAKTO Webhook] [SUCCESS] Conta criada no Firebase Auth. UID: ${userRecord.uid}`);
+          } catch (createErr: any) {
+            console.error(`[CAKTO Webhook] [FATAL] Falha crítica ao executar createUser() no Firebase Auth. Stack completa:`, createErr.stack || createErr);
+            throw createErr;
+          }
         } else {
+          console.error(`[CAKTO Webhook] [FATAL] Erro ao buscar usuário por e-mail no Firebase Auth. Stack completa:`, err.stack || err);
           throw err;
         }
       }
 
       // Generate standard password reset / creation link
       try {
+        console.log(`[CAKTO Webhook] [INFO] Gerando link de definição de senha oficial do Firebase para: ${email}`);
         const actionCodeSettings = {
           url: `${req.protocol}://${req.get("host")}/?action=create-password&email=${encodeURIComponent(email)}&temp=${encodeURIComponent(tempPassword)}`,
         };
         passwordCreationLink = await authAdmin.generatePasswordResetLink(email, actionCodeSettings);
-        console.log(`[CAKTO Webhook] Link oficial do Firebase Auth gerado: ${passwordCreationLink}`);
-      } catch (linkErr) {
-        console.warn("[CAKTO Webhook] Erro ao gerar link oficial, usando fallback do simulador:", linkErr);
+        console.log(`[CAKTO Webhook] [SUCCESS] Link oficial do Firebase Auth gerado com sucesso: ${passwordCreationLink}`);
+      } catch (linkErr: any) {
+        console.warn(`[CAKTO Webhook] [WARN] Erro ao gerar link oficial, usando fallback do simulador. Stack:`, linkErr.stack || linkErr);
         passwordCreationLink = `${req.protocol}://${req.get("host")}/?action=create-password&email=${encodeURIComponent(email)}&temp=${encodeURIComponent(tempPassword)}`;
       }
     } else {
       // For cancels, try to look up user to get the correct UID
+      console.log(`[CAKTO Webhook] [INFO] Evento de inativação/cancelamento. Buscando UID correspondente se existir para: ${email}`);
       try {
         userRecord = await adminAuth().getUserByEmail(email);
-      } catch (err) {}
+        console.log(`[CAKTO Webhook] [INFO] Usuário localizado para inativação: ${email} (UID: ${userRecord.uid})`);
+      } catch (err) {
+        console.log(`[CAKTO Webhook] [INFO] Usuário não possuía conta ativa no Firebase Auth para: ${email}`);
+      }
     }
 
     // Determine the UID (fallback if they are not in auth yet)
@@ -238,11 +301,13 @@ router.post("/cakto-webhook", async (req: Request, res: Response) => {
       lastUpdated: new Date().toISOString()
     };
 
+    console.log(`[CAKTO Webhook] [INFO] Gravando documento de assinatura no Firestore em "/subscriptions/${uid}"`);
     await subDocRef.set(subscriptionData, { merge: true });
-    console.log(`[CAKTO Webhook] Documento salvo no Firestore em /subscriptions/${uid} com status: ${statusAssinatura}`);
+    console.log(`[CAKTO Webhook] [SUCCESS] Documento salvo com sucesso no Firestore com status: ${statusAssinatura}`);
 
     // 9. Add to simulated email inbox so developers can access the password link in UI sandbox
     if (isApprovedPayment && passwordCreationLink) {
+      console.log(`[CAKTO Webhook] [INFO] Adicionando e-mail de boas-vindas à caixa simulada.`);
       const simulatedEmails = loadSimulatedEmails();
       const newEmail: SavedEmail = {
         id: `mail-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -256,6 +321,9 @@ router.post("/cakto-webhook", async (req: Request, res: Response) => {
       simulatedEmails.unshift(newEmail);
       saveSimulatedEmails(simulatedEmails.slice(0, 10)); // Keep last 10 emails
     }
+
+    console.log(`[CAKTO Webhook] [SUCCESS] [${new Date().toISOString()}] PROCESSAMENTO FINALIZADO COM SUCESSO!`);
+    console.log(`========================================\n`);
 
     return res.status(200).json({
       success: true,
@@ -271,7 +339,9 @@ router.post("/cakto-webhook", async (req: Request, res: Response) => {
     });
 
   } catch (error: any) {
-    console.error("[CAKTO Webhook] Erro crítico no processamento:", error);
+    console.error(`[CAKTO Webhook] [FATAL ERROR] [${new Date().toISOString()}] Erro crítico no processamento do webhook:`, error);
+    console.error(`[CAKTO Webhook] [FATAL ERROR] Stack de erro completa:`, error.stack || error);
+    console.log(`========================================\n`);
     return res.status(500).json({
       success: false,
       message: "Erro interno ao processar o webhook.",
