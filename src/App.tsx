@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { AuthProvider, useAuth } from "./providers/AuthProvider";
 import { AuthUI } from "./components/AuthUI";
+import { AtivarConta } from "./components/AtivarConta";
+import { AdminPanel } from "./components/AdminPanel";
 import { 
   Search, 
   RefreshCw, 
@@ -1893,6 +1895,47 @@ export function SinceroNewsApp() {
 
 function AppContent() {
   const { user, loading, isBlocked, isCheckingProfile, logout } = useAuth();
+  const [currentPath, setCurrentPath] = useState(window.location.pathname);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setCurrentPath(window.location.pathname);
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  const navigateTo = (path: string) => {
+    window.history.pushState({}, "", path);
+    setCurrentPath(path);
+  };
+
+  // Se a rota for /ativar-conta, renderiza a tela de Ativar Conta
+  if (currentPath === "/ativar-conta") {
+    return (
+      <AtivarConta 
+        onGoToLogin={() => navigateTo("/")} 
+      />
+    );
+  }
+
+  // Se a rota for /admin, renderiza o Painel de Controle Administrativo
+  if (currentPath === "/admin") {
+    if (loading) {
+      return (
+        <div className="min-h-screen bg-[#070707] text-white flex flex-col justify-center items-center font-sans">
+          <div className="flex flex-col items-center gap-3">
+            <RefreshCw className="w-8 h-8 text-[#0ea5e9] animate-spin" />
+            <span className="text-xs font-mono tracking-widest text-neutral-400 uppercase">Verificando Credenciais...</span>
+          </div>
+        </div>
+      );
+    }
+    if (!user) {
+      return <AuthUI />;
+    }
+    return <AdminPanel onNavigate={navigateTo} />;
+  }
 
   if (loading || isCheckingProfile) {
     return (

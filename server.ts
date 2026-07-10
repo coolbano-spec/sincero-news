@@ -5,6 +5,7 @@ import Parser from "rss-parser";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import webhookRouter from "./server/routes/webhook";
+import adminRouter from "./server/routes/admin";
 
 const app = express();
 const PORT = 3000;
@@ -19,6 +20,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Mount the CAKTO and debugging endpoints
 app.use("/api", webhookRouter);
+app.use("/api/admin", adminRouter);
 
 // Initialize rss-parser
 const parser = new Parser();
