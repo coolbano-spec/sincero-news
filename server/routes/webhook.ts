@@ -92,9 +92,28 @@ router.post("/cakto-webhook", async (req: Request, res: Response) => {
     // 1. Signature validation (HMAC SHA-256)
     const secret = process.env.CAKTO_SECRET_KEY;
     if (secret && !isSimulated) {
-      const signature = req.headers["x-cakto-signature"] || req.headers["x-signature"] || req.headers["signature"];
+      const headerNamesChecked = ["x-cakto-signature", "x-signature", "signature"];
+      let headerFound: string | null = null;
+      let signature: string | undefined = undefined;
+
+      for (const h of headerNamesChecked) {
+        if (req.headers[h]) {
+          headerFound = h;
+          signature = req.headers[h] as string;
+          break;
+        }
+      }
+
+      const headersAbsent = headerNamesChecked.filter(h => !req.headers[h]);
+
       if (!signature) {
         console.error(`[CAKTO Webhook] [ERROR] [${new Date().toISOString()}] Validação HMAC falhou: Assinatura ausente.`);
+        console.error(`[CAKTO Webhook] [AUDIT] Todos os headers recebidos:\n`, JSON.stringify(req.headers, null, 2));
+        console.error(`[CAKTO Webhook] [AUDIT] Header de assinatura encontrado: nenhum`);
+        console.error(`[CAKTO Webhook] [AUDIT] Headers de assinatura ausentes: ${headersAbsent.join(", ")}`);
+        console.error(`[CAKTO Webhook] [AUDIT] Assinatura calculada: N/A (Assinatura recebida ausente)`);
+        console.error(`[CAKTO Webhook] [AUDIT] Assinatura recebida: ausente`);
+        console.error(`[CAKTO Webhook] [AUDIT] Comparação que falhou: Nenhuma assinatura foi enviada.`);
         return res.status(401).json({ success: false, message: "Webhook sem assinatura obrigatória (X-Cakto-Signature)." });
       }
 
@@ -102,7 +121,13 @@ router.post("/cakto-webhook", async (req: Request, res: Response) => {
       const computedSignature = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
 
       if (computedSignature !== signature) {
-        console.error(`[CAKTO Webhook] [ERROR] [${new Date().toISOString()}] Validação HMAC falhou: Assinaturas não coincidem.`, { computedSignature, signature });
+        console.error(`[CAKTO Webhook] [ERROR] [${new Date().toISOString()}] Validação HMAC falhou: Assinaturas não coincidem.`);
+        console.error(`[CAKTO Webhook] [AUDIT] Todos os headers recebidos:\n`, JSON.stringify(req.headers, null, 2));
+        console.error(`[CAKTO Webhook] [AUDIT] Header de assinatura encontrado: "${headerFound}"`);
+        console.error(`[CAKTO Webhook] [AUDIT] Headers de assinatura ausentes: ${headersAbsent.join(", ")}`);
+        console.error(`[CAKTO Webhook] [AUDIT] Assinatura calculada (HMAC-SHA256): "${computedSignature}"`);
+        console.error(`[CAKTO Webhook] [AUDIT] Assinatura recebida: "${signature}"`);
+        console.error(`[CAKTO Webhook] [AUDIT] Comparação que falhou: "${computedSignature}" !== "${signature}"`);
         return res.status(401).json({ success: false, message: "Assinatura do webhook inválida." });
       }
       console.log(`[CAKTO Webhook] [SUCCESS] [${new Date().toISOString()}] Validação HMAC passou: Assinatura validada com sucesso via HMAC-SHA256!`);
