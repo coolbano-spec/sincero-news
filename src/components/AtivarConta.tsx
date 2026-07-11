@@ -10,7 +10,7 @@ import {
   Eye, 
   EyeOff 
 } from "lucide-react";
-import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
+import { createUserWithEmailAndPassword, updateProfile, signInWithEmailAndPassword, updatePassword } from "firebase/auth";
 import { doc, setDoc } from "firebase/firestore";
 import { auth, db } from "../services/firebaseClient";
 
@@ -56,22 +56,48 @@ export const AtivarConta: React.FC<AtivarContaProps> = ({ onGoToLogin }) => {
 
     try {
       const emailLower = email.trim().toLowerCase();
+      let userCredential;
 
-      // 1. Create a user in Firebase Authentication using email and password
-      const userCredential = await createUserWithEmailAndPassword(auth, emailLower, senha);
-      
-      // Update display name in Firebase Profile
-      if (userCredential.user) {
-        await updateProfile(userCredential.user, { displayName: nome.trim() });
+      try {
+        // 1. Tentar criar a conta no Firebase Authentication
+        userCredential = await createUserWithEmailAndPassword(auth, emailLower, senha);
+        
+        // Atualiza o nome de exibição no Firebase Profile
+        if (userCredential.user) {
+          await updateProfile(userCredential.user, { displayName: nome.trim() });
+        }
+        console.log("[AtivarConta] Nova conta de usuário criada com sucesso via Client SDK.");
+      } catch (createErr: any) {
+        // Se a conta já existe (por exemplo, criada automaticamente pelo webhook da Cakto)
+        if (createErr.code === "auth/email-already-in-use" || createErr.code === "auth/email-already-exists") {
+          console.log("[AtivarConta] Usuário já existe. Tentando fazer login e atualizar senha...");
+          try {
+            // Tenta fazer login com a senha digitada pelo usuário (caso já tenha definido)
+            userCredential = await signInWithEmailAndPassword(auth, emailLower, senha);
+            console.log("[AtivarConta] Login realizado com sucesso com a senha existente.");
+          } catch (signInErr: any) {
+            // Se falhar, tenta o login com a senha temporária determinística que o webhook gera
+            const tempPassword = `Sincero@${emailLower.replace(/[^a-zA-Z0-9]/g, "").substring(0, 8)}2026`;
+            try {
+              userCredential = await signInWithEmailAndPassword(auth, emailLower, tempPassword);
+              // Atualiza de senha provisória para permanente
+              await updatePassword(userCredential.user, senha);
+              // Também garante o nome de exibição atualizado
+              await updateProfile(userCredential.user, { displayName: nome.trim() });
+              console.log("[AtivarConta] Senha atualizada de provisória para permanente com sucesso.");
+            } catch (tempErr: any) {
+              console.error("[AtivarConta] Erro ao tentar login de ativação:", tempErr);
+              throw new Error("Este e-mail já está cadastrado com uma senha ativa. Se esqueceu sua senha, utilize a opção de recuperação de senha.");
+            }
+          }
+        } else {
+          throw createErr;
+        }
       }
 
-      // 2. Create automatically a document in Firestore
-      // Coleção: users
-      // Documento: UID do Firebase
+      // 2. Garantir o documento na coleção 'users' com o usuário autenticado de forma segura
       const userDocRef = doc(db, "users", userCredential.user.uid);
       
-      // Salvar:
-      // nome, email, createdAt, role = "user", status = "pending", subscription = false, origin = "primeiro-acesso"
       const userData = {
         nome: nome.trim(),
         email: emailLower,
@@ -90,15 +116,13 @@ export const AtivarConta: React.FC<AtivarContaProps> = ({ onGoToLogin }) => {
       }, 1500);
 
     } catch (err: any) {
-      console.error("[AtivarConta] Erro ao criar conta:", err);
-      if (err.code === "auth/email-already-in-use") {
-        setError("Este e-mail já está em uso por outra conta.");
-      } else if (err.code === "auth/invalid-email") {
+      console.error("[AtivarConta] Erro ao ativar conta:", err);
+      if (err.code === "auth/invalid-email") {
         setError("O e-mail digitado não é válido.");
       } else if (err.code === "auth/weak-password") {
         setError("A senha escolhida é muito fraca.");
       } else {
-        setError(err.message || "Erro ao criar sua conta. Tente novamente mais tarde.");
+        setError(err.message || "Erro ao ativar sua conta. Tente novamente mais tarde.");
       }
     } finally {
       setLoading(false);
