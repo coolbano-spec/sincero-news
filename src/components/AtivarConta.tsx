@@ -11,8 +11,7 @@ import {
   EyeOff 
 } from "lucide-react";
 import { createUserWithEmailAndPassword, updateProfile, signInWithEmailAndPassword, updatePassword } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
-import { auth, db } from "../services/firebaseClient";
+import { auth } from "../services/firebaseClient";
 
 interface AtivarContaProps {
   onGoToLogin: () => void;
@@ -105,22 +104,7 @@ export const AtivarConta: React.FC<AtivarContaProps> = ({ onGoToLogin }) => {
         }
       }
 
-      // 2. Garantir o documento na coleção 'users' com o usuário autenticado de forma segura
-      const userDocRef = doc(db, "users", userCredential.user.uid);
-      
-      const userData = {
-        nome: nome.trim(),
-        email: emailLower,
-        createdAt: new Date().toISOString(),
-        role: "user",
-        status: "pending",
-        subscription: false,
-        origin: "primeiro-acesso"
-      };
-
-      await setDoc(userDocRef, userData);
-
-      setSuccess("Conta criada com sucesso! Redirecionando...");
+      setSuccess("Conta ativada com sucesso! Redirecionando...");
       setTimeout(() => {
         window.location.href = "/";
       }, 1500);

@@ -348,6 +348,23 @@ router.post("/cakto-webhook", async (req: Request, res: Response) => {
     await subDocRef.set(subscriptionData, { merge: true });
     console.log(`[CAKTO Webhook] [SUCCESS] Documento salvo com sucesso no Firestore com status: ${statusAssinatura}`);
 
+    // Also create or merge the user document in the "users" collection using Admin SDK
+    const userDocRef = dbAdmin.collection("users").doc(uid);
+    const userData: any = {
+      uid,
+      nome,
+      email: email.trim().toLowerCase(),
+      role: "user",
+      status: "pending",
+      subscription: true,
+      origin: "cakto",
+      createdAt: new Date().toISOString(),
+      lastUpdated: new Date().toISOString()
+    };
+    console.log(`[CAKTO Webhook] [INFO] Gravando documento de usuário no Firestore em "/users/${uid}"`);
+    await userDocRef.set(userData, { merge: true });
+    console.log(`[CAKTO Webhook] [SUCCESS] Documento de usuário salvo com sucesso no Firestore.`);
+
     // 9. Add to simulated email inbox so developers can access the password link in UI sandbox
     if (isApprovedPayment && passwordCreationLink) {
       console.log(`[CAKTO Webhook] [INFO] Adicionando e-mail de boas-vindas à caixa simulada.`);
