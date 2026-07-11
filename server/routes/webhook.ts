@@ -285,6 +285,7 @@ router.post("/cakto-webhook", async (req: Request, res: Response) => {
           try {
             userRecord = await authAdmin.createUser({
               email,
+              password: tempPassword,
               displayName: nome,
             });
             console.log(`[CAKTO Webhook] [SUCCESS] Conta criada no Firebase Auth. UID: ${userRecord.uid}`);

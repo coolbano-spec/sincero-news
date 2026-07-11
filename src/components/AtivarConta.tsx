@@ -59,39 +59,49 @@ export const AtivarConta: React.FC<AtivarContaProps> = ({ onGoToLogin }) => {
       let userCredential;
 
       try {
-        // 1. Tentar criar a conta no Firebase Authentication
-        userCredential = await createUserWithEmailAndPassword(auth, emailLower, senha);
-        
-        // Atualiza o nome de exibição no Firebase Profile
+        // 1. Tentar login primeiro usando a senha digitada pelo usuário
+        userCredential = await signInWithEmailAndPassword(auth, emailLower, senha);
+        console.log("[AtivarConta] Login realizado com sucesso usando a senha fornecida pelo usuário.");
         if (userCredential.user) {
           await updateProfile(userCredential.user, { displayName: nome.trim() });
         }
-        console.log("[AtivarConta] Nova conta de usuário criada com sucesso via Client SDK.");
-      } catch (createErr: any) {
-        // Se a conta já existe (por exemplo, criada automaticamente pelo webhook da Cakto)
-        if (createErr.code === "auth/email-already-in-use" || createErr.code === "auth/email-already-exists") {
-          console.log("[AtivarConta] Usuário já existe. Tentando fazer login e atualizar senha...");
-          try {
-            // Tenta fazer login com a senha digitada pelo usuário (caso já tenha definido)
-            userCredential = await signInWithEmailAndPassword(auth, emailLower, senha);
-            console.log("[AtivarConta] Login realizado com sucesso com a senha existente.");
-          } catch (signInErr: any) {
-            // Se falhar, tenta o login com a senha temporária determinística que o webhook gera
-            const tempPassword = `Sincero@${emailLower.replace(/[^a-zA-Z0-9]/g, "").substring(0, 8)}2026`;
+      } catch (signInErr: any) {
+        // Se falhar o login, pode ser que o usuário tenha sido pré-criado e a senha informada esteja errada (senha temporária ativa),
+        // ou que o usuário não exista.
+        const tempPassword = `Sincero@${emailLower.replace(/[^a-zA-Z0-9]/g, "").substring(0, 8)}2026`;
+        console.log("[AtivarConta] Falha no login inicial. Tentando com a senha temporária...");
+        
+        try {
+          userCredential = await signInWithEmailAndPassword(auth, emailLower, tempPassword);
+          console.log("[AtivarConta] Login realizado com sucesso com a senha temporária.");
+          
+          // Após autenticar com a temporária, atualiza para a nova senha do usuário
+          await updatePassword(userCredential.user, senha);
+          await updateProfile(userCredential.user, { displayName: nome.trim() });
+          console.log("[AtivarConta] Senha atualizada com sucesso de provisória para permanente.");
+        } catch (tempErr: any) {
+          // Se falhar o login com a temporária e o erro indicar que o usuário não existe, tentamos criar a conta do zero
+          if (
+            tempErr.code === "auth/user-not-found" || 
+            tempErr.code === "auth/invalid-credential" || 
+            tempErr.code === "auth/wrong-password" ||
+            tempErr.code === "auth/invalid-email"
+          ) {
+            console.log("[AtivarConta] Usuário não encontrado ou credencial inválida com temporária. Tentando criar conta do zero...");
             try {
-              userCredential = await signInWithEmailAndPassword(auth, emailLower, tempPassword);
-              // Atualiza de senha provisória para permanente
-              await updatePassword(userCredential.user, senha);
-              // Também garante o nome de exibição atualizado
-              await updateProfile(userCredential.user, { displayName: nome.trim() });
-              console.log("[AtivarConta] Senha atualizada de provisória para permanente com sucesso.");
-            } catch (tempErr: any) {
-              console.error("[AtivarConta] Erro ao tentar login de ativação:", tempErr);
-              throw new Error("Este e-mail já está cadastrado com uma senha ativa. Se esqueceu sua senha, utilize a opção de recuperação de senha.");
+              userCredential = await createUserWithEmailAndPassword(auth, emailLower, senha);
+              if (userCredential.user) {
+                await updateProfile(userCredential.user, { displayName: nome.trim() });
+              }
+              console.log("[AtivarConta] Nova conta de usuário criada com sucesso via Client SDK.");
+            } catch (createErr: any) {
+              console.error("[AtivarConta] Erro ao criar conta do zero:", createErr);
+              throw createErr;
             }
+          } else {
+            console.error("[AtivarConta] Erro crítico no fluxo de ativação:", tempErr);
+            throw tempErr;
           }
-        } else {
-          throw createErr;
         }
       }
 
