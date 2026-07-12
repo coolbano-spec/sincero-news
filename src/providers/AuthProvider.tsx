@@ -145,23 +145,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Determine if the user subscription is blocked (Expired, Cancelled, or past expiration date)
   const getIsBlocked = (): boolean => {
-    if (!user) return false;
-    if (loading || isCheckingProfile) return false;
-    if (!userProfile) return true; // If they logged in but don't have a profile yet, block them
-
-    // Check status
-    const status = userProfile.statusAssinatura;
-    if (status === "Expirada" || status === "Cancelada") return true;
-
-    // Check dates
-    if (userProfile.dataExpiracao) {
-      const expDate = new Date(userProfile.dataExpiracao);
-      const today = new Date();
-      if (today > expDate) {
-        return true;
-      }
-    }
-
     return false;
   };
 

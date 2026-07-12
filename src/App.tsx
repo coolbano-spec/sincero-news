@@ -1894,7 +1894,7 @@ export function SinceroNewsApp() {
 }
 
 function AppContent() {
-  const { user, loading, isBlocked, isCheckingProfile, logout } = useAuth();
+  const { user, loading, isCheckingProfile, logout } = useAuth();
   const [currentPath, setCurrentPath] = useState(window.location.pathname);
 
   useEffect(() => {
@@ -1951,53 +1951,6 @@ function AppContent() {
   // Se o usuário não está autenticado, exibe a AuthUI
   if (!user) {
     return <AuthUI />;
-  }
-
-  // Se o usuário está autenticado mas a assinatura está inativa ou expirada, exibe tela de bloqueio
-  if (isBlocked) {
-    return (
-      <div className="min-h-screen bg-[#070707] text-white flex flex-col justify-center items-center font-sans px-4 relative overflow-hidden">
-        {/* Decoração sutil de fundo */}
-        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[350px] h-[350px] bg-[#0ea5e9]/10 rounded-full blur-[100px] pointer-events-none" />
-        
-        <div className="w-full max-w-md bg-[#0F0F0F] border border-neutral-900 rounded-2xl p-8 shadow-2xl relative z-10 flex flex-col items-center text-center">
-          <div className="w-16 h-16 rounded-full bg-red-950/20 border border-red-900/50 flex items-center justify-center mb-6 text-red-500 shadow-inner">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
-            </svg>
-          </div>
-
-          <h2 className="text-xl font-medium font-sans tracking-tight text-white mb-2">
-            Sua assinatura não está ativa.
-          </h2>
-          
-          <p className="text-sm text-neutral-400 font-sans mb-8 leading-relaxed">
-            Detectamos que sua assinatura do Sincero News está expirada, cancelada ou não foi encontrada no nosso sistema. Ative seu plano para acessar nossas análises e notícias sem filtros.
-          </p>
-
-          <div className="w-full flex flex-col gap-3">
-            <button
-              onClick={() => {
-                // Link futuro para checkout de regularização
-                window.open("https://sinceronews.com.br", "_blank");
-              }}
-              className="w-full py-3 px-4 bg-[#0ea5e9] hover:bg-[#0284c7] text-white font-semibold rounded-lg transition duration-300 shadow-lg text-sm cursor-pointer"
-              id="regularize-sub-btn"
-            >
-              Regularizar assinatura
-            </button>
-
-            <button
-              onClick={logout}
-              className="w-full py-2.5 px-4 bg-transparent border border-neutral-800 text-neutral-400 font-medium rounded-lg hover:bg-neutral-900 hover:text-white transition duration-300 text-xs cursor-pointer"
-              id="logout-sub-btn"
-            >
-              Sair da conta
-            </button>
-          </div>
-        </div>
-      </div>
-    );
   }
 
   // Se o usuário está autenticado e ativo, exibe o aplicativo de notícias principal (Home)

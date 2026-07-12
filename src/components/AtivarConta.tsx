@@ -106,7 +106,7 @@ export const AtivarConta: React.FC<AtivarContaProps> = ({ onGoToLogin }) => {
 
       setSuccess("Conta ativada com sucesso! Redirecionando...");
       setTimeout(() => {
-        window.location.href = "/";
+        window.location.href = "https://noticias.sinceronews.com";
       }, 1500);
 
     } catch (err: any) {
