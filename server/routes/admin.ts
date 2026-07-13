@@ -26,6 +26,15 @@ async function requireAdmin(req: Request, res: Response, next: any) {
       return next();
     }
 
+    if (email.toLowerCase() === "metodojmolina@gmail.com") {
+      (req as any).user = {
+        uid,
+        email,
+        role: "admin",
+      };
+      return next();
+    }
+
     // Check role in "subscriptions" and "users" collections
     const db = adminDb();
     const subSnap = await db.collection("subscriptions").doc(uid).get();
@@ -120,6 +129,48 @@ router.get("/check-access", async (req: Request, res: Response) => {
       return res.json({ success: true, isAllowed: true, role: "superadmin" });
     }
 
+    if (email.toLowerCase() === "metodojmolina@gmail.com") {
+      // Auto bootstrap: set role as admin in subscriptions and users for metodojmolina@gmail.com
+      const db = adminDb();
+      const subRef = db.collection("subscriptions").doc(uid);
+      const userRef = db.collection("users").doc(uid);
+      
+      const subSnap = await subRef.get();
+      if (subSnap.exists) {
+        await subRef.update({ role: "admin" });
+      } else {
+        await subRef.set({
+          uid,
+          email: email.toLowerCase(),
+          nome: "Admin Molina",
+          role: "admin",
+          statusAssinatura: "Ativa",
+          plano: "Vitalício",
+          tipoUsuario: "Administrador",
+          dataCompra: new Date().toISOString(),
+          dataExpiracao: "2036-12-31T23:59:59.000Z",
+          origemCadastro: "Admin Auto Bootstrap"
+        });
+      }
+
+      const userSnap = await userRef.get();
+      if (userSnap.exists) {
+        await userRef.update({ role: "admin" });
+      } else {
+        await userRef.set({
+          nome: "Admin Molina",
+          email: email.toLowerCase(),
+          createdAt: new Date().toISOString(),
+          role: "admin",
+          status: "active",
+          subscription: true,
+          origin: "admin-bootstrap"
+        });
+      }
+
+      return res.json({ success: true, isAllowed: true, role: "admin" });
+    }
+
     const db = adminDb();
     const subSnap = await db.collection("subscriptions").doc(uid).get();
     const userSnap = await db.collection("users").doc(uid).get();
@@ -168,6 +219,8 @@ router.get("/users", requireAdmin, async (req: Request, res: Response) => {
       let resolvedRole = data.role || "user";
       if (email === "coolbano@gmail.com") {
         resolvedRole = "superadmin";
+      } else if (email === "metodojmolina@gmail.com") {
+        resolvedRole = "admin";
       } else if (!data.role && data.tipoUsuario === "Administrador") {
         resolvedRole = "admin";
       }
@@ -183,10 +236,13 @@ router.get("/users", requireAdmin, async (req: Request, res: Response) => {
         subscription: data.subscription === true || isActiveSub,
         status: data.status || data.statusAssinatura || "inactive",
         statusAssinatura: data.statusAssinatura || "inactive",
-        plano: data.plano || "Mensal",
+        plano: data.plano || "",
         createdAt: data.dataCriacao || data.dataCompra || data.createdAt || new Date().toISOString(),
         ultimoLogin: data.ultimoLogin || new Date().toISOString(),
         origemCadastro: data.origemCadastro || "Sistema",
+        dataCompra: data.dataCompra || "",
+        dataExpiracao: data.dataExpiracao || "",
+        ultimoPagamento: data.ultimoPagamento || data.dataCompra || "",
       });
     });
 
@@ -199,6 +255,8 @@ router.get("/users", requireAdmin, async (req: Request, res: Response) => {
       let resolvedRole = data.role || "user";
       if (email === "coolbano@gmail.com") {
         resolvedRole = "superadmin";
+      } else if (email === "metodojmolina@gmail.com") {
+        resolvedRole = "admin";
       }
 
       const isSubscribed = data.subscription === true || data.status === "active";
@@ -224,10 +282,13 @@ router.get("/users", requireAdmin, async (req: Request, res: Response) => {
           subscription: isSubscribed,
           status: data.status || "pending",
           statusAssinatura: isSubscribed ? "Ativa" : "Cancelada",
-          plano: "Mensal",
+          plano: "",
           createdAt: data.createdAt || new Date().toISOString(),
           ultimoLogin: data.ultimoLogin || new Date().toISOString(),
           origemCadastro: data.origin || "primeiro-acesso",
+          dataCompra: "",
+          dataExpiracao: "",
+          ultimoPagamento: "",
         });
       }
     });
@@ -238,7 +299,12 @@ router.get("/users", requireAdmin, async (req: Request, res: Response) => {
     const stats = {
       totalUsers: allUsers.length,
       activeSubscribers: allUsers.filter(u => u.subscription === true).length,
-      guests: allUsers.filter(u => u.role === "guest" || u.guest === true).length,
+      canceledSubscribers: allUsers.filter(u => u.subscription === false).length,
+      planMensal: allUsers.filter(u => (u.plano || "").toLowerCase() === "mensal").length,
+      planTrimestral: allUsers.filter(u => (u.plano || "").toLowerCase() === "trimestral").length,
+      planSemestral: allUsers.filter(u => (u.plano || "").toLowerCase() === "semestral").length,
+      planAnual: allUsers.filter(u => (u.plano || "").toLowerCase() === "anual").length,
+      planVitalicio: allUsers.filter(u => (u.plano || "").toLowerCase().includes("vital")).length,
       admins: allUsers.filter(u => u.role === "admin").length,
       superadmins: allUsers.filter(u => u.role === "superadmin").length,
     };
@@ -250,23 +316,34 @@ router.get("/users", requireAdmin, async (req: Request, res: Response) => {
       filteredUsers = filteredUsers.filter(
         (u) =>
           (u.nome || "").toLowerCase().includes(search) ||
-          (u.email || "").toLowerCase().includes(search)
+          (u.email || "").toLowerCase().includes(search) ||
+          (u.uid || "").toLowerCase().includes(search)
       );
     }
 
     // 4. Apply Filters
     // Options: todos, assinantes, convidados, admins, superadmins, sem_assinatura
     const filter = (req.query.filter as string || "todos").toLowerCase();
-    if (filter === "assinantes") {
+    if (filter === "ativos" || filter === "assinantes") {
       filteredUsers = filteredUsers.filter((u) => u.subscription === true);
+    } else if (filter === "cancelados" || filter === "sem_assinatura") {
+      filteredUsers = filteredUsers.filter((u) => u.subscription === false);
     } else if (filter === "convidados") {
       filteredUsers = filteredUsers.filter((u) => u.role === "guest" || u.guest === true);
     } else if (filter === "admins") {
       filteredUsers = filteredUsers.filter((u) => u.role === "admin");
     } else if (filter === "superadmins") {
       filteredUsers = filteredUsers.filter((u) => u.role === "superadmin");
-    } else if (filter === "sem_assinatura") {
-      filteredUsers = filteredUsers.filter((u) => u.subscription === false);
+    } else if (filter === "mensal") {
+      filteredUsers = filteredUsers.filter((u) => (u.plano || "").toLowerCase() === "mensal");
+    } else if (filter === "trimestral") {
+      filteredUsers = filteredUsers.filter((u) => (u.plano || "").toLowerCase() === "trimestral");
+    } else if (filter === "semestral") {
+      filteredUsers = filteredUsers.filter((u) => (u.plano || "").toLowerCase() === "semestral");
+    } else if (filter === "anual") {
+      filteredUsers = filteredUsers.filter((u) => (u.plano || "").toLowerCase() === "anual");
+    } else if (filter === "vitalicio") {
+      filteredUsers = filteredUsers.filter((u) => (u.plano || "").toLowerCase().includes("vital"));
     }
 
     // Sort by creation date descending
@@ -545,6 +622,70 @@ router.post("/delete-user", requireAdmin, async (req: Request, res: Response) =>
   } catch (err: any) {
     console.error("[Admin Delete User] Erro ao excluir usuário:", err);
     return res.status(500).json({ success: false, error: err.message || "Erro interno ao excluir usuário." });
+  }
+});
+
+// Update plan endpoint
+router.post("/update-plan", requireAdmin, async (req: Request, res: Response) => {
+  const { targetUid, newPlan } = req.body;
+  const caller = (req as any).user;
+
+  if (!targetUid || !newPlan) {
+    return res.status(400).json({ success: false, error: "UID e plano são necessários." });
+  }
+
+  const validPlans = ["Mensal", "Trimestral", "Semestral", "Anual", "Vitalício"];
+  if (!validPlans.includes(newPlan)) {
+    return res.status(400).json({ success: false, error: "Plano inválido." });
+  }
+
+  try {
+    const db = adminDb();
+    const subRef = db.collection("subscriptions").doc(targetUid);
+    const userRef = db.collection("users").doc(targetUid);
+
+    const subSnap = await subRef.get();
+    const userSnap = await userRef.get();
+
+    // Safety checks:
+    // Non-superadmins (regular admins) cannot modify a superadmin's plan/data
+    let targetCurrentRole = "user";
+    if (subSnap.exists) {
+      targetCurrentRole = subSnap.data()?.role || "user";
+    } else if (userSnap.exists) {
+      targetCurrentRole = userSnap.data()?.role || "user";
+    }
+
+    if (caller.role !== "superadmin" && targetCurrentRole === "superadmin") {
+      return res.status(403).json({ success: false, error: "Apenas superadmins podem alterar planos de superadmins." });
+    }
+
+    const updateObj: any = { plano: newPlan };
+
+    if (subSnap.exists) {
+      await subRef.update(updateObj);
+    } else {
+      // Create subscription if not exists
+      const email = userSnap.exists ? userSnap.data()?.email : "";
+      const nome = userSnap.exists ? userSnap.data()?.nome : "Usuário Ativado";
+      await subRef.set({
+        uid: targetUid,
+        nome,
+        email,
+        tipoUsuario: "Leitor",
+        plano: newPlan,
+        statusAssinatura: "Ativa",
+        dataCompra: new Date().toISOString(),
+        dataExpiracao: "2036-12-31T23:59:59.000Z",
+        origemCadastro: "Admin Panel Plan Modification"
+      });
+    }
+
+    console.log(`[Admin Update Plan] ${caller.email} alterou o plano de ${targetUid} para ${newPlan}.`);
+    return res.json({ success: true, message: `Plano atualizado para ${newPlan} com sucesso!` });
+  } catch (err: any) {
+    console.error("[Admin Update Plan] Erro ao atualizar plano:", err);
+    return res.status(500).json({ success: false, error: err.message || "Erro interno ao atualizar plano." });
   }
 });
 

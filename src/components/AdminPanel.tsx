@@ -19,7 +19,12 @@ import {
   CheckCircle, 
   AlertTriangle,
   FileText,
-  Key
+  Key,
+  Calendar,
+  Layers,
+  MapPin,
+  Clock,
+  Eye
 } from "lucide-react";
 import { useAuth } from "../providers/AuthProvider";
 
@@ -36,12 +41,20 @@ interface AdminUser {
   createdAt: string;
   ultimoLogin: string;
   origemCadastro: string;
+  dataCompra?: string;
+  dataExpiracao?: string;
+  ultimoPagamento?: string;
 }
 
 interface Stats {
   totalUsers: number;
   activeSubscribers: number;
-  guests: number;
+  canceledSubscribers: number;
+  planMensal: number;
+  planTrimestral: number;
+  planSemestral: number;
+  planAnual: number;
+  planVitalicio: number;
   admins: number;
   superadmins: number;
 }
@@ -54,17 +67,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
   const { user, logout } = useAuth();
   
   // Navigation & Menu States
-  const [activeTab, setActiveTab] = useState<"dashboard" | "usuarios" | "assinaturas" | "convidados" | "administradores" | "configuracoes">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "usuarios" | "configuracoes">("dashboard");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [accessVerified, setAccessVerified] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
+
+  // Selected User for details sidebar
+  const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
 
   // Users Data & Query States
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [stats, setStats] = useState<Stats>({
     totalUsers: 0,
     activeSubscribers: 0,
-    guests: 0,
+    canceledSubscribers: 0,
+    planMensal: 0,
+    planTrimestral: 0,
+    planSemestral: 0,
+    planAnual: 0,
+    planVitalicio: 0,
     admins: 0,
     superadmins: 0
   });
@@ -129,13 +150,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
     try {
       const idToken = await user.getIdToken();
       
-      // Map frontend tab selections to API query filters if applicable
-      let resolvedFilter = filter;
-      if (activeTab === "assinaturas") resolvedFilter = "assinantes";
-      else if (activeTab === "convidados") resolvedFilter = "convidados";
-      else if (activeTab === "administradores") resolvedFilter = "admins";
-
-      const url = `/api/admin/users?page=${page}&limit=12&search=${encodeURIComponent(search)}&filter=${resolvedFilter}`;
+      const url = `/api/admin/users?page=${page}&limit=12&search=${encodeURIComponent(search)}&filter=${filter}`;
       
       const res = await fetch(url, {
         headers: {
@@ -149,6 +164,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
         setStats(data.stats);
         setTotalPages(data.pagination.totalPages);
         setTotalItems(data.pagination.totalItems);
+
+        // Update selected user reference if open to reflect new values
+        if (selectedUser) {
+          const updated = data.users.find((u: AdminUser) => u.uid === selectedUser.uid);
+          if (updated) {
+            setSelectedUser(updated);
+          }
+        }
       } else {
         showFeedback("error", data.error || "Erro ao carregar usuários.");
       }
@@ -179,11 +202,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
   }, [search]);
 
   // Handle Tab navigation
-  const handleTabChange = (tab: any) => {
+  const handleTabChange = (tab: "dashboard" | "usuarios" | "configuracoes") => {
     setActiveTab(tab);
     setPage(1);
     setFilter("todos"); // Reset filter on tab changes
     setIsSidebarOpen(false);
+    setSelectedUser(null);
   };
 
   const showFeedback = (type: "success" | "error", text: string) => {
@@ -280,6 +304,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
     }
   };
 
+  // Change Plan
+  const handlePlanChange = async (targetUid: string, newPlan: string) => {
+    if (!user) return;
+    setActionLoading(targetUid);
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch("/api/admin/update-plan", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`
+        },
+        body: JSON.stringify({ targetUid, newPlan })
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        showFeedback("success", `Plano atualizado para ${newPlan} com sucesso!`);
+        fetchUsers();
+      } else {
+        showFeedback("error", data.error || "Erro ao alterar plano.");
+      }
+    } catch (err) {
+      showFeedback("error", "Erro na requisição.");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   // Delete User Account
   const handleDeleteUser = async (targetUid: string, targetNome: string) => {
     if (!window.confirm(`Tem certeza de que deseja excluir permanentemente o usuário ${targetNome}? Esta ação é irreversível e excluirá o usuário do banco e do Authentication.`)) {
@@ -302,6 +355,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
 
       if (data.success) {
         showFeedback("success", "Usuário deletado permanentemente!");
+        setSelectedUser(null);
         fetchUsers();
       } else {
         showFeedback("error", data.error || "Erro ao excluir usuário.");
@@ -342,9 +396,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
   };
 
   // Format dates elegantly
-  const formatDate = (dateStr: string) => {
+  const formatDate = (dateStr?: string) => {
+    if (!dateStr) return "-";
     try {
       const date = new Date(dateStr);
+      if (isNaN(date.getTime())) return dateStr;
       return date.toLocaleDateString("pt-BR", {
         day: "2-digit",
         month: "2-digit",
@@ -449,42 +505,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
             </button>
 
             <button 
-              onClick={() => handleTabChange("assinaturas")}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm transition-all cursor-pointer ${
-                activeTab === "assinaturas" 
-                  ? "bg-sky-500/10 text-sky-400 border-l-2 border-sky-500 font-medium" 
-                  : "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900/50"
-              }`}
-            >
-              <UserCheck className="w-4 h-4" />
-              <span>Assinaturas</span>
-            </button>
-
-            <button 
-              onClick={() => handleTabChange("convidados")}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm transition-all cursor-pointer ${
-                activeTab === "convidados" 
-                  ? "bg-sky-500/10 text-sky-400 border-l-2 border-sky-500 font-medium" 
-                  : "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900/50"
-              }`}
-            >
-              <UserPlus className="w-4 h-4" />
-              <span>Convidados</span>
-            </button>
-
-            <button 
-              onClick={() => handleTabChange("administradores")}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm transition-all cursor-pointer ${
-                activeTab === "administradores" 
-                  ? "bg-sky-500/10 text-sky-400 border-l-2 border-sky-500 font-medium" 
-                  : "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900/50"
-              }`}
-            >
-              <Shield className="w-4 h-4" />
-              <span>Administradores</span>
-            </button>
-
-            <button 
               onClick={() => handleTabChange("configuracoes")}
               className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm transition-all cursor-pointer ${
                 activeTab === "configuracoes" 
@@ -544,8 +564,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
             <span className="text-[10px] uppercase font-mono tracking-widest text-sky-400">
               Sincero News / Painel Administrativo / {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
             </span>
-            <h1 className="text-2xl font-bold tracking-tight text-white capitalize mt-1">
-              {activeTab === "usuarios" ? "Controle de Usuários" : activeTab}
+            <h1 className="text-2xl font-bold tracking-tight text-white mt-1">
+              {activeTab === "usuarios" ? "Controle de Usuários" : activeTab === "dashboard" ? "Painel de Controle" : "Configurações"}
             </h1>
           </div>
 
@@ -588,43 +608,103 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
               <div className="bg-[#0f0f0f] border border-neutral-800/60 rounded-xl p-4 shadow-xl flex flex-col justify-between relative overflow-hidden" id="card-users">
                 <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-neutral-500/25 to-transparent" />
                 <div className="flex items-center justify-between text-neutral-400 mb-2">
-                  <span className="text-[10px] font-mono tracking-wider uppercase">Usuários Cadastrados</span>
+                  <span className="text-[10px] font-mono tracking-wider uppercase text-left">Total de Usuários</span>
                   <Users className="w-4 h-4 text-sky-400" />
                 </div>
                 <div>
                   <h3 className="text-2xl font-bold tracking-tight">{stats.totalUsers}</h3>
-                  <p className="text-[10px] text-neutral-500 font-mono mt-0.5">Total de contas criadas</p>
+                  <p className="text-[10px] text-neutral-500 font-mono mt-0.5">Contas registradas</p>
                 </div>
               </div>
 
               <div className="bg-[#0f0f0f] border border-neutral-800/60 rounded-xl p-4 shadow-xl flex flex-col justify-between relative overflow-hidden" id="card-subscribers">
                 <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-emerald-500/25 to-transparent" />
                 <div className="flex items-center justify-between text-neutral-400 mb-2">
-                  <span className="text-[10px] font-mono tracking-wider uppercase">Assinantes Ativos</span>
+                  <span className="text-[10px] font-mono tracking-wider uppercase text-left">Assinaturas Ativas</span>
                   <UserCheck className="w-4 h-4 text-emerald-400" />
                 </div>
                 <div>
                   <h3 className="text-2xl font-bold tracking-tight text-emerald-400">{stats.activeSubscribers}</h3>
-                  <p className="text-[10px] text-neutral-500 font-mono mt-0.5">Com acesso liberado</p>
+                  <p className="text-[10px] text-neutral-500 font-mono mt-0.5">Acesso liberado</p>
                 </div>
               </div>
 
-              <div className="bg-[#0f0f0f] border border-neutral-800/60 rounded-xl p-4 shadow-xl flex flex-col justify-between relative overflow-hidden" id="card-guests">
-                <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-amber-500/25 to-transparent" />
+              <div className="bg-[#0f0f0f] border border-neutral-800/60 rounded-xl p-4 shadow-xl flex flex-col justify-between relative overflow-hidden" id="card-canceled">
+                <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-red-500/25 to-transparent" />
                 <div className="flex items-center justify-between text-neutral-400 mb-2">
-                  <span className="text-[10px] font-mono tracking-wider uppercase">Convidados</span>
-                  <UserPlus className="w-4 h-4 text-amber-500" />
+                  <span className="text-[10px] font-mono tracking-wider uppercase text-left">Assinaturas Canceladas</span>
+                  <UserX className="w-4 h-4 text-red-400" />
                 </div>
                 <div>
-                  <h3 className="text-2xl font-bold tracking-tight text-amber-500">{stats.guests}</h3>
-                  <p className="text-[10px] text-neutral-500 font-mono mt-0.5">Acesso guest = true</p>
+                  <h3 className="text-2xl font-bold tracking-tight text-red-400">{stats.canceledSubscribers}</h3>
+                  <p className="text-[10px] text-neutral-500 font-mono mt-0.5">Acesso revogado/cancelado</p>
+                </div>
+              </div>
+
+              <div className="bg-[#0f0f0f] border border-neutral-800/60 rounded-xl p-4 shadow-xl flex flex-col justify-between relative overflow-hidden" id="card-mensal">
+                <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-sky-500/25 to-transparent" />
+                <div className="flex items-center justify-between text-neutral-400 mb-2">
+                  <span className="text-[10px] font-mono tracking-wider uppercase text-left">Plano Mensal</span>
+                  <FileText className="w-4 h-4 text-sky-400" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold tracking-tight text-white">{stats.planMensal}</h3>
+                  <p className="text-[10px] text-neutral-500 font-mono mt-0.5">Assinantes Mensais</p>
+                </div>
+              </div>
+
+              <div className="bg-[#0f0f0f] border border-neutral-800/60 rounded-xl p-4 shadow-xl flex flex-col justify-between relative overflow-hidden" id="card-trimestral">
+                <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-sky-500/25 to-transparent" />
+                <div className="flex items-center justify-between text-neutral-400 mb-2">
+                  <span className="text-[10px] font-mono tracking-wider uppercase text-left">Plano Trimestral</span>
+                  <FileText className="w-4 h-4 text-sky-400" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold tracking-tight text-white">{stats.planTrimestral}</h3>
+                  <p className="text-[10px] text-neutral-500 font-mono mt-0.5">Assinantes Trimestrais</p>
+                </div>
+              </div>
+
+              <div className="bg-[#0f0f0f] border border-neutral-800/60 rounded-xl p-4 shadow-xl flex flex-col justify-between relative overflow-hidden" id="card-semestral">
+                <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-purple-500/25 to-transparent" />
+                <div className="flex items-center justify-between text-neutral-400 mb-2">
+                  <span className="text-[10px] font-mono tracking-wider uppercase text-left">Plano Semestral</span>
+                  <FileText className="w-4 h-4 text-purple-400" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold tracking-tight text-white">{stats.planSemestral}</h3>
+                  <p className="text-[10px] text-neutral-500 font-mono mt-0.5">Assinantes Semestrais</p>
+                </div>
+              </div>
+
+              <div className="bg-[#0f0f0f] border border-neutral-800/60 rounded-xl p-4 shadow-xl flex flex-col justify-between relative overflow-hidden" id="card-anual">
+                <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-purple-500/25 to-transparent" />
+                <div className="flex items-center justify-between text-neutral-400 mb-2">
+                  <span className="text-[10px] font-mono tracking-wider uppercase text-left">Plano Anual</span>
+                  <FileText className="w-4 h-4 text-purple-400" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold tracking-tight text-white">{stats.planAnual}</h3>
+                  <p className="text-[10px] text-neutral-500 font-mono mt-0.5">Assinantes Anuais</p>
+                </div>
+              </div>
+
+              <div className="bg-[#0f0f0f] border border-neutral-800/60 rounded-xl p-4 shadow-xl flex flex-col justify-between relative overflow-hidden" id="card-vitalicio">
+                <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-amber-500/25 to-transparent" />
+                <div className="flex items-center justify-between text-neutral-400 mb-2">
+                  <span className="text-[10px] font-mono tracking-wider uppercase text-left">Plano Vitalício</span>
+                  <FileText className="w-4 h-4 text-amber-500" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold tracking-tight text-amber-500">{stats.planVitalicio}</h3>
+                  <p className="text-[10px] text-neutral-500 font-mono mt-0.5">Assinantes Vitalícios</p>
                 </div>
               </div>
 
               <div className="bg-[#0f0f0f] border border-neutral-800/60 rounded-xl p-4 shadow-xl flex flex-col justify-between relative overflow-hidden" id="card-admins">
                 <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-blue-500/25 to-transparent" />
                 <div className="flex items-center justify-between text-neutral-400 mb-2">
-                  <span className="text-[10px] font-mono tracking-wider uppercase">Administradores</span>
+                  <span className="text-[10px] font-mono tracking-wider uppercase text-left">Administradores</span>
                   <Shield className="w-4 h-4 text-blue-400" />
                 </div>
                 <div>
@@ -636,7 +716,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
               <div className="bg-[#0f0f0f] border border-neutral-800/60 rounded-xl p-4 shadow-xl flex flex-col justify-between relative overflow-hidden" id="card-superadmins">
                 <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-red-500/25 to-transparent" />
                 <div className="flex items-center justify-between text-neutral-400 mb-2">
-                  <span className="text-[10px] font-mono tracking-wider uppercase">Superadmins</span>
+                  <span className="text-[10px] font-mono tracking-wider uppercase text-left">Superadmins</span>
                   <Shield className="w-4 h-4 text-red-500" />
                 </div>
                 <div>
@@ -696,12 +776,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
                       <span>Firestore DB</span>
                       <span className="text-emerald-400 font-medium font-mono">Ativo (default)</span>
                     </div>
-                    <div className="flex justify-between pb-2 border-b border-neutral-900">
-                      <span>Cakto Webhook Secret</span>
-                      <span className={process.env.CAKTO_SECRET_KEY ? "text-emerald-400 font-medium font-mono" : "text-amber-500 font-medium font-mono"}>
-                        {process.env.CAKTO_SECRET_KEY ? "Configurado" : "Pendente"}
-                      </span>
-                    </div>
                     <div className="flex justify-between pb-2">
                       <span>Ambiente</span>
                       <span className="text-sky-400 font-medium font-mono">Produção (Cloud)</span>
@@ -720,8 +794,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
           </div>
         )}
 
-        {/* 2. TABLE AND FILTERS WORKSPACE (USUARIOS, ASSINATURAS, CONVIDADOS, ADMINISTRADORES) */}
-        {activeTab !== "dashboard" && activeTab !== "configuracoes" && (
+        {/* 2. TABLE AND FILTERS WORKSPACE (USUARIOS) */}
+        {activeTab === "usuarios" && (
           <div className="bg-[#0f0f0f] border border-neutral-800/60 rounded-xl shadow-2xl relative overflow-hidden flex flex-col">
             <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-sky-500/40 to-transparent" />
             
@@ -735,39 +809,41 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
                   type="text"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Pesquisar por nome ou e-mail..."
+                  placeholder="Pesquisar por Nome, E-mail ou UID..."
                   className="w-full bg-[#141414] border border-neutral-800 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 text-xs text-white rounded-lg pl-10 pr-4 py-2.5 outline-none transition-all placeholder:text-neutral-500"
                 />
               </div>
 
-              {/* Filter tabs (visible only on full users tab, customized on others) */}
-              {activeTab === "usuarios" && (
-                <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
-                  {[
-                    { id: "todos", label: "Todos" },
-                    { id: "assinantes", label: "Assinantes" },
-                    { id: "convidados", label: "Convidados" },
-                    { id: "admins", label: "Admins" },
-                    { id: "superadmins", label: "SuperAdmins" },
-                    { id: "sem_assinatura", label: "Sem assinatura" }
-                  ].map((f) => (
-                    <button
-                      key={f.id}
-                      onClick={() => {
-                        setFilter(f.id);
-                        setPage(1);
-                      }}
-                      className={`px-3 py-1.5 rounded-lg text-xs transition-all cursor-pointer border ${
-                        filter === f.id
-                          ? "bg-sky-500/10 text-sky-400 border-sky-500/30"
-                          : "bg-neutral-900 border-neutral-800/60 text-neutral-400 hover:text-white"
-                      }`}
-                    >
-                      {f.label}
-                    </button>
-                  ))}
-                </div>
-              )}
+              {/* Filter tabs */}
+              <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
+                {[
+                  { id: "todos", label: "Todos" },
+                  { id: "mensal", label: "Mensal" },
+                  { id: "trimestral", label: "Trimestral" },
+                  { id: "semestral", label: "Semestral" },
+                  { id: "anual", label: "Anual" },
+                  { id: "vitalicio", label: "Vitalício" },
+                  { id: "ativos", label: "Ativos" },
+                  { id: "cancelados", label: "Cancelados" },
+                  { id: "admins", label: "Admins" },
+                  { id: "superadmins", label: "SuperAdmins" }
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => {
+                      setFilter(f.id);
+                      setPage(1);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs transition-all cursor-pointer border ${
+                      filter === f.id
+                        ? "bg-sky-500/10 text-sky-400 border-sky-500/30"
+                        : "bg-neutral-900 border-neutral-800/60 text-neutral-400 hover:text-white"
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
 
               {/* Informational item counts indicator */}
               <div className="text-[10px] font-mono text-neutral-500 self-end md:self-center">
@@ -788,94 +864,94 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
                   <p className="text-xs text-neutral-400 font-mono">Nenhum usuário correspondente localizado.</p>
                 </div>
               ) : (
-                <table className="w-full text-left border-collapse min-w-[800px]">
+                <table className="w-full text-left border-collapse min-w-[1000px]">
                   <thead>
                     <tr className="bg-neutral-950/40 border-b border-neutral-900 text-[10px] font-mono uppercase tracking-wider text-neutral-500">
-                      <th className="px-5 py-3.5">Nome / E-mail</th>
-                      <th className="px-5 py-3.5">Permissão (Role)</th>
-                      <th className="px-5 py-3.5">Assinatura</th>
-                      <th className="px-5 py-3.5">Criação da Conta</th>
-                      <th className="px-5 py-3.5">Último Login</th>
-                      <th className="px-5 py-3.5 text-right">Ações de Controle</th>
+                      <th className="px-4 py-3">Nome</th>
+                      <th className="px-4 py-3">Email</th>
+                      <th className="px-4 py-3">Plano</th>
+                      <th className="px-4 py-3">Status da assinatura</th>
+                      <th className="px-4 py-3">Role</th>
+                      <th className="px-4 py-3">Data da compra</th>
+                      <th className="px-4 py-3">Data de expiração</th>
+                      <th className="px-4 py-3">UID</th>
+                      <th className="px-4 py-3 text-right">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-900/60">
                     {users.map((item) => (
                       <tr 
                         key={item.uid} 
-                        className="hover:bg-neutral-950/20 text-xs transition-colors"
+                        onClick={() => setSelectedUser(item)}
+                        className="hover:bg-neutral-950/30 text-xs transition-colors cursor-pointer"
                       >
-                        {/* Name and email */}
-                        <td className="px-5 py-3.5">
-                          <div className="flex flex-col">
-                            <span className="font-semibold text-white truncate max-w-[200px]" title={item.nome}>
-                              {item.nome}
+                        {/* Name */}
+                        <td className="px-4 py-3.5 font-semibold text-white">
+                          <span className="truncate max-w-[150px] block" title={item.nome}>
+                            {item.nome}
+                          </span>
+                        </td>
+
+                        {/* Email */}
+                        <td className="px-4 py-3.5 text-neutral-400 font-mono">
+                          <span className="truncate max-w-[180px] block" title={item.email}>
+                            {item.email}
+                          </span>
+                        </td>
+
+                        {/* Plano */}
+                        <td className="px-4 py-3.5 font-mono text-neutral-400">
+                          {item.plano ? (
+                            <span className="text-sky-400 bg-sky-950/20 px-2 py-0.5 rounded border border-sky-500/10 text-[11px]">
+                              {item.plano}
                             </span>
-                            <span className="text-[11px] text-neutral-500 font-mono truncate mt-0.5" title={item.email}>
-                              {item.email}
+                          ) : (
+                            <span className="text-neutral-500 italic text-[11px]">
+                              Plano não identificado
                             </span>
-                          </div>
+                          )}
                         </td>
 
-                        {/* Permission role selection */}
-                        <td className="px-5 py-3.5">
-                          <div className="flex items-center gap-2">
-                            {/* Role badge display */}
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-mono capitalize ${getRoleBadgeClasses(item.role)}`}>
-                              {getRoleLabel(item.role)}
+                        {/* Status da assinatura */}
+                        <td className="px-4 py-3.5 font-mono">
+                          {item.subscription ? (
+                            <span className="bg-emerald-950/40 text-emerald-400 border border-emerald-500/20 text-[10px] px-2 py-0.5 rounded inline-flex items-center gap-1">
+                              <CheckCircle className="w-3 h-3" />
+                              Ativa
                             </span>
-
-                            {/* Dropdown for role changes */}
-                            {/* Rule: admins cannot change roles of superadmins or promote anyone to superadmin */}
-                            {(userRole === "superadmin" || (userRole === "admin" && item.role !== "superadmin")) && (
-                              <select
-                                value={item.role}
-                                disabled={actionLoading === item.uid}
-                                onChange={(e) => handleRoleChange(item.uid, e.target.value)}
-                                className="bg-[#141414] border border-neutral-800 text-[10px] text-neutral-300 rounded px-1.5 py-0.5 focus:border-sky-500/50 outline-none transition-all font-mono"
-                              >
-                                <option value="user">User</option>
-                                <option value="guest">Guest</option>
-                                <option value="admin">Admin</option>
-                                {userRole === "superadmin" && <option value="superadmin">Superadmin</option>}
-                              </select>
-                            )}
-                          </div>
+                          ) : (
+                            <span className="bg-neutral-800 text-neutral-500 border border-neutral-700/60 text-[10px] px-2 py-0.5 rounded inline-block">
+                              Cancelada
+                            </span>
+                          )}
                         </td>
 
-                        {/* Subscription indicators */}
-                        <td className="px-5 py-3.5">
-                          <div className="flex flex-col items-start gap-1">
-                            {item.subscription ? (
-                              <span className="bg-emerald-950/40 text-emerald-400 border border-emerald-500/20 text-[10px] font-mono px-2 py-0.5 rounded flex items-center gap-1">
-                                <CheckCircle className="w-3 h-3" />
-                                Ativa
-                              </span>
-                            ) : (
-                              <span className="bg-neutral-800 text-neutral-500 border border-neutral-700/60 text-[10px] font-mono px-2 py-0.5 rounded">
-                                Sem acesso
-                              </span>
-                            )}
-                            {item.plano && (
-                              <span className="text-[10px] text-neutral-500 font-mono">
-                                Plano: {item.plano}
-                              </span>
-                            )}
-                          </div>
+                        {/* Role */}
+                        <td className="px-4 py-3.5">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-mono capitalize inline-block ${getRoleBadgeClasses(item.role)}`}>
+                            {getRoleLabel(item.role)}
+                          </span>
                         </td>
 
-                        {/* Creation date */}
-                        <td className="px-5 py-3.5 text-neutral-400 font-mono text-[11px]">
-                          {formatDate(item.createdAt)}
+                        {/* Data da compra */}
+                        <td className="px-4 py-3.5 text-neutral-400 font-mono text-[11px]">
+                          {formatDate(item.dataCompra || item.createdAt)}
                         </td>
 
-                        {/* Last login date */}
-                        <td className="px-5 py-3.5 text-neutral-400 font-mono text-[11px]">
-                          {formatDate(item.ultimoLogin)}
+                        {/* Data de expiração */}
+                        <td className="px-4 py-3.5 text-neutral-400 font-mono text-[11px]">
+                          {formatDate(item.dataExpiracao)}
                         </td>
 
-                        {/* Action buttons */}
-                        <td className="px-5 py-3.5 text-right">
+                        {/* UID */}
+                        <td className="px-4 py-3.5 text-neutral-500 font-mono text-[11px]">
+                          <span className="truncate max-w-[80px] block" title={item.uid}>
+                            {item.uid}
+                          </span>
+                        </td>
+
+                        {/* Action buttons shortcut */}
+                        <td className="px-4 py-3.5 text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-1.5">
                             {/* Toggle Subscription Access button */}
                             {item.subscription ? (
@@ -883,40 +959,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
                                 onClick={() => handleRevokeAccess(item.uid)}
                                 disabled={actionLoading !== null}
                                 title="Revogar acesso"
-                                className="flex items-center gap-1 px-2.5 py-1.5 rounded bg-amber-950/20 text-amber-500 border border-amber-500/10 hover:bg-amber-950/40 hover:border-amber-500/30 text-[10px] font-medium tracking-wide transition-all cursor-pointer"
+                                className="p-1 rounded bg-amber-950/20 text-amber-500 border border-amber-500/10 hover:bg-amber-950/40 hover:border-amber-500/30 transition-all cursor-pointer"
                               >
-                                <UserX className="w-3 h-3" />
-                                <span>Bloquear</span>
+                                <UserX className="w-3.5 h-3.5" />
                               </button>
                             ) : (
                               <button
                                 onClick={() => handleGrantAccess(item.uid)}
                                 disabled={actionLoading !== null}
                                 title="Liberar acesso"
-                                className="flex items-center gap-1 px-2.5 py-1.5 rounded bg-emerald-950/20 text-emerald-400 border border-emerald-500/10 hover:bg-emerald-950/40 hover:border-emerald-500/30 text-[10px] font-medium tracking-wide transition-all cursor-pointer"
+                                className="p-1 rounded bg-emerald-950/20 text-emerald-400 border border-emerald-500/10 hover:bg-emerald-950/40 hover:border-emerald-500/30 transition-all cursor-pointer"
                               >
-                                <UserCheck className="w-3 h-3" />
-                                <span>Liberar</span>
+                                <UserCheck className="w-3.5 h-3.5" />
                               </button>
                             )}
 
-                            {/* Excluir/Delete button */}
-                            {/* Rules:
-                                - Admins cannot delete Superadmins
-                                - Admins cannot delete other Admins (only superadmin can)
-                                - Superadmin can delete anyone (except themselves/main owner)
-                            */}
-                            {((userRole === "superadmin" && item.role !== "superadmin") || 
-                              (userRole === "admin" && item.role !== "superadmin" && item.role !== "admin")) && (
-                              <button
-                                onClick={() => handleDeleteUser(item.uid, item.nome)}
-                                disabled={actionLoading !== null}
-                                title="Excluir permanentemente"
-                                className="p-1.5 rounded bg-red-950/10 text-red-500 hover:bg-red-950/35 hover:text-red-400 transition-all cursor-pointer border border-red-500/5"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
+                            {/* View detailed panel button */}
+                            <button
+                              onClick={() => setSelectedUser(item)}
+                              title="Visualizar Detalhes"
+                              className="p-1 rounded bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white transition-all cursor-pointer"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -1033,6 +1098,252 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
           </div>
         )}
       </main>
+
+      {/* DETALHES SIDEBAR (DRAWER) PANEL */}
+      <AnimatePresence>
+        {selectedUser && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.5 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedUser(null)}
+              className="fixed inset-0 bg-black z-50"
+            />
+
+            {/* Sidebar Slider Container */}
+            <motion.div
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className="fixed top-0 right-0 bottom-0 w-full sm:w-[450px] bg-[#0c0c0c] border-l border-neutral-800/80 z-50 flex flex-col shadow-2xl h-full"
+            >
+              {/* Drawer Header */}
+              <div className="p-5 border-b border-neutral-900 flex items-center justify-between bg-neutral-950/20">
+                <div className="flex items-center gap-2">
+                  <Shield className="w-5 h-5 text-sky-400" />
+                  <h2 className="text-sm font-bold uppercase tracking-wider font-mono text-white">Detalhes do Usuário</h2>
+                </div>
+                <button 
+                  onClick={() => setSelectedUser(null)}
+                  className="p-1.5 hover:bg-neutral-900 rounded text-neutral-400 hover:text-white transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Drawer Content Area */}
+              <div className="flex-1 overflow-y-auto p-5 space-y-6">
+                
+                {/* User Header Info Card */}
+                <div className="p-4 bg-neutral-900/30 border border-neutral-800/60 rounded-xl flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-full bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 font-bold text-lg">
+                    {selectedUser.nome.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="overflow-hidden">
+                    <h3 className="text-sm font-bold text-white truncate">{selectedUser.nome}</h3>
+                    <p className="text-xs text-neutral-500 truncate font-mono">{selectedUser.email}</p>
+                  </div>
+                </div>
+
+                {/* Properties Section */}
+                <div className="space-y-4">
+                  <h4 className="text-[10px] uppercase font-mono tracking-wider text-neutral-500 border-b border-neutral-900 pb-1.5">Informações de Registro</h4>
+                  
+                  <div className="grid grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <span className="text-neutral-500 block mb-0.5 font-mono text-[10px] uppercase">Nome</span>
+                      <span className="text-white font-medium">{selectedUser.nome}</span>
+                    </div>
+
+                    <div>
+                      <span className="text-neutral-500 block mb-0.5 font-mono text-[10px] uppercase">Email</span>
+                      <span className="text-white font-medium font-mono truncate block" title={selectedUser.email}>{selectedUser.email}</span>
+                    </div>
+
+                    <div className="col-span-2">
+                      <span className="text-neutral-500 block mb-0.5 font-mono text-[10px] uppercase">UID</span>
+                      <span className="text-neutral-300 font-mono text-[11px] bg-neutral-950/60 border border-neutral-800/50 px-2 py-1 rounded block select-all">
+                        {selectedUser.uid}
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-neutral-500 block mb-0.5 font-mono text-[10px] uppercase">Plano</span>
+                      <span className="text-white font-mono font-medium">
+                        {selectedUser.plano ? (
+                          <span className="text-sky-400 bg-sky-500/5 border border-sky-500/15 px-2 py-0.5 rounded text-[11px]">
+                            {selectedUser.plano}
+                          </span>
+                        ) : (
+                          <span className="text-neutral-500 italic text-[11px]">
+                            Plano não identificado
+                          </span>
+                        )}
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-neutral-500 block mb-0.5 font-mono text-[10px] uppercase">Status de Assinatura</span>
+                      <span className="font-mono text-[11px]">
+                        {selectedUser.subscription ? (
+                          <span className="bg-emerald-950/40 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded inline-flex items-center gap-1">
+                            <CheckCircle className="w-3 h-3" />
+                            Ativa
+                          </span>
+                        ) : (
+                          <span className="bg-neutral-800 text-neutral-500 border border-neutral-700/60 px-2 py-0.5 rounded inline-block">
+                            Cancelada
+                          </span>
+                        )}
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-neutral-500 block mb-0.5 font-mono text-[10px] uppercase">Cargo (Role)</span>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-mono capitalize inline-block ${getRoleBadgeClasses(selectedUser.role)}`}>
+                        {getRoleLabel(selectedUser.role)}
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-neutral-500 block mb-0.5 font-mono text-[10px] uppercase">Origem Cadastro</span>
+                      <span className="text-neutral-300 flex items-center gap-1">
+                        <MapPin className="w-3.5 h-3.5 text-neutral-500" />
+                        <span className="truncate">{selectedUser.origemCadastro}</span>
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-neutral-500 block mb-0.5 font-mono text-[10px] uppercase">Data Compra</span>
+                      <span className="text-neutral-300 flex items-center gap-1 font-mono">
+                        <Calendar className="w-3.5 h-3.5 text-neutral-500" />
+                        <span>{formatDate(selectedUser.dataCompra || selectedUser.createdAt)}</span>
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-neutral-500 block mb-0.5 font-mono text-[10px] uppercase">Expiração</span>
+                      <span className="text-neutral-300 flex items-center gap-1 font-mono">
+                        <Clock className="w-3.5 h-3.5 text-neutral-500" />
+                        <span>{formatDate(selectedUser.dataExpiracao)}</span>
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-neutral-500 block mb-0.5 font-mono text-[10px] uppercase">Último Pagamento</span>
+                      <span className="text-neutral-300 flex items-center gap-1 font-mono">
+                        <Layers className="w-3.5 h-3.5 text-neutral-500" />
+                        <span>{formatDate(selectedUser.ultimoPagamento || selectedUser.dataCompra)}</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Controls Area inside detail sidebar */}
+                <div className="space-y-4 pt-4 border-t border-neutral-900">
+                  <h4 className="text-[10px] uppercase font-mono tracking-wider text-neutral-500 pb-1 border-b border-neutral-900">Ações de Controle Administrativo</h4>
+                  
+                  <div className="space-y-3">
+                    {/* Toggle subscription access */}
+                    <div>
+                      <label className="text-[10px] font-mono text-neutral-500 block mb-1.5 uppercase">Acesso à Assinatura</label>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleGrantAccess(selectedUser.uid)}
+                          disabled={actionLoading !== null}
+                          className={`flex-1 py-2 rounded font-medium text-xs border transition-all cursor-pointer inline-flex items-center justify-center gap-1.5 ${
+                            selectedUser.subscription 
+                              ? "bg-neutral-900 border-neutral-800 text-neutral-400 cursor-not-allowed opacity-50" 
+                              : "bg-emerald-950/20 text-emerald-400 border-emerald-500/20 hover:bg-emerald-950/45 hover:border-emerald-500/35"
+                          }`}
+                        >
+                          <UserCheck className="w-3.5 h-3.5" />
+                          <span>Liberar acesso</span>
+                        </button>
+                        <button
+                          onClick={() => handleRevokeAccess(selectedUser.uid)}
+                          disabled={actionLoading !== null}
+                          className={`flex-1 py-2 rounded font-medium text-xs border transition-all cursor-pointer inline-flex items-center justify-center gap-1.5 ${
+                            !selectedUser.subscription 
+                              ? "bg-neutral-900 border-neutral-800 text-neutral-400 cursor-not-allowed opacity-50" 
+                              : "bg-amber-950/20 text-amber-500 border-amber-500/20 hover:bg-amber-950/45 hover:border-amber-500/35"
+                          }`}
+                        >
+                          <UserX className="w-3.5 h-3.5" />
+                          <span>Bloquear acesso</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Alterar Plano */}
+                    <div>
+                      <label className="text-[10px] font-mono text-neutral-500 block mb-1 uppercase">Alterar Plano</label>
+                      <select
+                        value={selectedUser.plano || ""}
+                        disabled={actionLoading !== null || (userRole !== "superadmin" && selectedUser.role === "superadmin")}
+                        onChange={(e) => handlePlanChange(selectedUser.uid, e.target.value)}
+                        className="w-full bg-[#141414] border border-neutral-800 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 text-xs text-white rounded-lg px-3 py-2 outline-none transition-all font-mono"
+                      >
+                        <option value="" disabled>Selecione um plano...</option>
+                        <option value="Mensal">Mensal</option>
+                        <option value="Trimestral">Trimestral</option>
+                        <option value="Semestral">Semestral</option>
+                        <option value="Anual">Anual</option>
+                        <option value="Vitalício">Vitalício</option>
+                      </select>
+                    </div>
+
+                    {/* Alterar Role */}
+                    <div>
+                      <label className="text-[10px] font-mono text-neutral-500 block mb-1 uppercase">Alterar Role (Nível)</label>
+                      {/* Safety: admins cannot touch superadmins or promote anyone to superadmin */}
+                      {(userRole === "superadmin" || (userRole === "admin" && selectedUser.role !== "superadmin")) ? (
+                        <select
+                          value={selectedUser.role}
+                          disabled={actionLoading !== null}
+                          onChange={(e) => handleRoleChange(selectedUser.uid, e.target.value)}
+                          className="w-full bg-[#141414] border border-neutral-800 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 text-xs text-white rounded-lg px-3 py-2 outline-none transition-all font-mono"
+                        >
+                          <option value="user">User</option>
+                          <option value="guest">Guest (Convidado)</option>
+                          <option value="admin">Admin</option>
+                          {userRole === "superadmin" && <option value="superadmin">Superadmin</option>}
+                        </select>
+                      ) : (
+                        <div className="text-xs text-neutral-500 font-mono italic">
+                          Apenas superadmins podem alterar cargos deste usuário.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Delete account */}
+                    {/* Safety:
+                        - Cannot delete coolbano@gmail.com
+                        - Regular admins cannot delete other admins or superadmins
+                    */}
+                    {((userRole === "superadmin" && selectedUser.email !== "coolbano@gmail.com") || 
+                      (userRole === "admin" && selectedUser.role !== "superadmin" && selectedUser.role !== "admin")) ? (
+                      <div className="pt-4 border-t border-neutral-900/60">
+                        <button
+                          onClick={() => handleDeleteUser(selectedUser.uid, selectedUser.nome)}
+                          disabled={actionLoading !== null}
+                          className="w-full py-2.5 bg-red-950/20 text-red-500 hover:bg-red-950/45 border border-red-950/40 rounded-lg text-xs font-bold uppercase transition-all cursor-pointer inline-flex items-center justify-center gap-2"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          <span>Excluir Usuário Permanentemente</span>
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
