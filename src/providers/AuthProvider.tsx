@@ -65,7 +65,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                       nome: sub.nome || currentUser.displayName || "Assinante Sincero",
                       email: currentUser.email || "",
                       tipoUsuario: (sub.tipoUsuario || "Leitor") as any,
-                      plano: (sub.plano || "Trimestral") as any,
+                      plano: (sub.plano || "") as any,
                       statusAssinatura: (sub.statusAssinatura || "Ativa") as any,
                       dataCompra: sub.dataCompra || new Date().toISOString(),
                       dataExpiracao: sub.dataExpiracao || new Date().toISOString(),

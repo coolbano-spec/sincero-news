@@ -207,7 +207,7 @@ export const AuthUI: React.FC<AuthUIProps> = () => {
       let subData = {
         nome: userCredential.user.displayName || "Assinante Sincero",
         tipoUsuario: "Leitor",
-        plano: "Trimestral",
+        plano: "",
         statusAssinatura: "Ativa",
         dataCompra: new Date().toISOString(),
         dataExpiracao: new Date().toISOString()
@@ -630,7 +630,7 @@ export const AuthUI: React.FC<AuthUIProps> = () => {
                 
                 <h2 className="text-xl font-bold mb-1 text-white">Assinatura Expirada</h2>
                 <p className="text-xs text-neutral-400 mb-4 px-2">
-                  Olá, <span className="text-white font-semibold">{userProfile?.nome || user?.displayName || "Leitor"}</span>. Detectamos que a sua assinatura do plano <span className="text-sky-400 font-mono font-bold uppercase text-[10px] bg-sky-500/10 border border-sky-500/20 px-1.5 py-0.5 rounded">{userProfile?.plano || "Trimestral"}</span> expirou ou foi cancelada no sistema de pagamentos.
+                  Olá, <span className="text-white font-semibold">{userProfile?.nome || user?.displayName || "Leitor"}</span>. Detectamos que a sua assinatura do plano <span className="text-sky-400 font-mono font-bold uppercase text-[10px] bg-sky-500/10 border border-sky-500/20 px-1.5 py-0.5 rounded">{userProfile?.plano || "Plano não identificado"}</span> expirou ou foi cancelada no sistema de pagamentos.
                 </p>
 
                 {userProfile && (

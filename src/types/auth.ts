@@ -9,7 +9,7 @@ export interface UserProfile {
   nome: string;
   email: string;
   tipoUsuario: TipoUsuario;
-  plano: PlanoAssinatura;
+  plano?: PlanoAssinatura | "";
   statusAssinatura: StatusAssinatura;
   dataCompra: string;
   dataExpiracao: string;

@@ -1055,7 +1055,7 @@ export function SinceroNewsApp() {
               <div className="h-4 w-[1px] bg-[#333] hidden sm:block"></div>
               <div className="flex items-center gap-2 text-xs">
                 <span className="text-[10px] font-mono bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded text-amber-500 uppercase font-bold">
-                  {userProfile?.tipoUsuario || "Leitor"} ({userProfile?.plano || "Trimestral"})
+                  {userProfile?.tipoUsuario || "Leitor"} ({userProfile?.plano || "Plano não identificado"})
                 </span>
                 <span className="text-white font-semibold hidden md:inline">{userProfile?.nome || user?.displayName || "Assinante"}</span>
                 <button
