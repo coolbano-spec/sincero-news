@@ -27,6 +27,7 @@ import {
   Eye
 } from "lucide-react";
 import { useAuth } from "../providers/AuthProvider";
+import { InvitesTab } from "./InvitesTab";
 
 interface AdminUser {
   uid: string;
@@ -67,7 +68,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
   const { user, logout } = useAuth();
   
   // Navigation & Menu States
-  const [activeTab, setActiveTab] = useState<"dashboard" | "usuarios" | "configuracoes">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "usuarios" | "configuracoes" | "convites">("dashboard");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [accessVerified, setAccessVerified] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
@@ -202,7 +203,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
   }, [search]);
 
   // Handle Tab navigation
-  const handleTabChange = (tab: "dashboard" | "usuarios" | "configuracoes") => {
+  const handleTabChange = (tab: "dashboard" | "usuarios" | "configuracoes" | "convites") => {
     setActiveTab(tab);
     setPage(1);
     setFilter("todos"); // Reset filter on tab changes
@@ -502,6 +503,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
             >
               <Users className="w-4 h-4" />
               <span>Usuários</span>
+            </button>
+
+            <button 
+              onClick={() => handleTabChange("convites")}
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm transition-all cursor-pointer ${
+                activeTab === "convites" 
+                  ? "bg-sky-500/10 text-sky-400 border-l-2 border-sky-500 font-medium" 
+                  : "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900/50"
+              }`}
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>Convites</span>
             </button>
 
             <button 
@@ -1096,6 +1109,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
               </ul>
             </div>
           </div>
+        )}
+
+        {/* 4. CONVITES VIEWPORT */}
+        {activeTab === "convites" && (
+          <InvitesTab 
+            userRole={userRole} 
+            user={user} 
+            showFeedback={showFeedback} 
+          />
         )}
       </main>
 

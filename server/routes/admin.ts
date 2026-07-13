@@ -689,4 +689,276 @@ router.post("/update-plan", requireAdmin, async (req: Request, res: Response) =>
   }
 });
 
+// --- CLIENT-FACING / PUBLIC INVITE ROUTES ---
+
+// Public endpoint to validate an invite token
+router.get("/invites/validate", async (req: Request, res: Response) => {
+  const token = req.query.token as string;
+  if (!token) {
+    return res.status(400).json({ success: false, error: "Token não fornecido." });
+  }
+
+  try {
+    const db = adminDb();
+    const doc = await db.collection("invites").doc(token).get();
+
+    if (!doc.exists) {
+      return res.status(404).json({ success: false, error: "Convite inválido ou inexistente." });
+    }
+
+    const data = doc.data();
+    if (!data) {
+      return res.status(404).json({ success: false, error: "Convite inválido ou inexistente." });
+    }
+
+    if (!data.active) {
+      return res.status(400).json({ success: false, error: "Este convite foi cancelado pelo administrador." });
+    }
+
+    if (data.used) {
+      return res.status(400).json({ success: false, error: "Este convite já foi utilizado para ativar outra conta." });
+    }
+
+    if (data.expiresAt) {
+      const expires = new Date(data.expiresAt);
+      if (expires < new Date()) {
+        return res.status(400).json({ success: false, error: "Este convite está expirado." });
+      }
+    }
+
+    return res.json({ success: true, invite: { role: data.role } });
+  } catch (err: any) {
+    console.error("[Public Invite Validate] Erro ao validar convite:", err);
+    return res.status(500).json({ success: false, error: "Erro interno ao validar convite." });
+  }
+});
+
+// Public endpoint to consume an invite token during registration
+router.post("/invites/consume", async (req: Request, res: Response) => {
+  const { token, uid, email, nome } = req.body;
+  if (!token || !uid || !email || !nome) {
+    return res.status(400).json({ success: false, error: "Todos os campos (token, uid, email, nome) são obrigatórios." });
+  }
+
+  try {
+    const db = adminDb();
+    const inviteRef = db.collection("invites").doc(token);
+    const doc = await inviteRef.get();
+
+    if (!doc.exists) {
+      return res.status(400).json({ success: false, error: "Convite inválido." });
+    }
+
+    const data = doc.data();
+    if (!data || !data.active || data.used) {
+      return res.status(400).json({ success: false, error: "Convite inválido, cancelado ou já utilizado." });
+    }
+
+    if (data.expiresAt) {
+      const expires = new Date(data.expiresAt);
+      if (expires < new Date()) {
+        return res.status(400).json({ success: false, error: "Convite expirado." });
+      }
+    }
+
+    const role = data.role || "user";
+
+    // Update invite status to used
+    await inviteRef.update({
+      used: true,
+      usedBy: uid,
+      usedAt: new Date().toISOString(),
+    });
+
+    // Create/update user document in 'users' collection
+    const userRef = db.collection("users").doc(uid);
+    await userRef.set({
+      uid,
+      nome,
+      email: email.toLowerCase(),
+      role: role,
+      status: "active",
+      subscription: true,
+      origin: "invite",
+      createdAt: new Date().toISOString(),
+      lastUpdated: new Date().toISOString()
+    }, { merge: true });
+
+    // Create/update subscription document in 'subscriptions' collection
+    const subRef = db.collection("subscriptions").doc(uid);
+    await subRef.set({
+      uid,
+      nome,
+      email: email.toLowerCase(),
+      tipoUsuario: (role === "admin" || role === "superadmin") ? "Administrador" : "Leitor",
+      plano: "Vitalício",
+      statusAssinatura: "Ativa",
+      dataCompra: new Date().toISOString(),
+      dataExpiracao: "2036-12-31T23:59:59.000Z",
+      origemCadastro: `Convite (${role})`,
+      lastUpdated: new Date().toISOString()
+    }, { merge: true });
+
+    console.log(`[Invite Consumed] Token ${token} consumido por ${email} (UID: ${uid}) com cargo ${role}.`);
+    return res.json({ success: true, message: "Convite consumido e conta ativada com sucesso!" });
+  } catch (err: any) {
+    console.error("[Public Invite Consume] Erro ao consumir convite:", err);
+    return res.status(500).json({ success: false, error: err.message || "Erro interno ao consumir convite." });
+  }
+});
+
+// --- ADMIN-PROTECTED INVITE ROUTES ---
+
+// List all generated invites
+router.get("/invites", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const db = adminDb();
+    const snap = await db.collection("invites").get();
+    const invites: any[] = [];
+    snap.forEach((doc) => {
+      invites.push({ id: doc.id, ...doc.data() });
+    });
+    // Sort by creation date descending
+    invites.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return res.json({ success: true, invites });
+  } catch (err: any) {
+    console.error("[Admin List Invites] Erro ao carregar convites:", err);
+    return res.status(500).json({ success: false, error: "Erro interno ao listar convites." });
+  }
+});
+
+// Create a new invite token
+router.post("/invites", requireAdmin, async (req: Request, res: Response) => {
+  const { role, validity } = req.body;
+  const caller = (req as any).user;
+
+  if (!role || !validity) {
+    return res.status(400).json({ success: false, error: "Cargo (role) e validade são obrigatórios." });
+  }
+
+  // Superadmin authorization check for administrative roles
+  if ((role === "admin" || role === "superadmin") && caller.role !== "superadmin") {
+    return res.status(403).json({ success: false, error: "Apenas o Superadmin pode gerar convites com cargos administrativos." });
+  }
+
+  try {
+    const db = adminDb();
+    
+    // Generate secure 16-character uppercase alphanumeric token
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let token = "";
+    for (let i = 0; i < 16; i++) {
+      token += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+
+    let expiresAt: string | null = null;
+    const now = new Date();
+    if (validity === "24h") {
+      expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+    } else if (validity === "7d") {
+      expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    } else if (validity === "30d") {
+      expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    } else if (validity === "90d") {
+      expiresAt = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000).toISOString();
+    } // If "permanente", expiresAt remains null
+
+    const newInvite = {
+      token,
+      role,
+      validity,
+      createdBy: caller.email,
+      createdAt: now.toISOString(),
+      expiresAt,
+      used: false,
+      usedBy: null,
+      usedAt: null,
+      active: true,
+    };
+
+    await db.collection("invites").doc(token).set(newInvite);
+    console.log(`[Admin Invite Create] ${caller.email} gerou convite ${token} para cargo ${role} (validade: ${validity}).`);
+    return res.json({ success: true, invite: newInvite });
+  } catch (err: any) {
+    console.error("[Admin Create Invite] Erro ao criar convite:", err);
+    return res.status(500).json({ success: false, error: "Erro interno ao gerar convite." });
+  }
+});
+
+// Cancel (deactivate) an active invite
+router.post("/invites/cancel", requireAdmin, async (req: Request, res: Response) => {
+  const { token } = req.body;
+  const caller = (req as any).user;
+
+  if (!token) {
+    return res.status(400).json({ success: false, error: "O token do convite é obrigatório." });
+  }
+
+  try {
+    const db = adminDb();
+    await db.collection("invites").doc(token).update({ active: false });
+    console.log(`[Admin Invite Cancel] ${caller.email} cancelou o convite ${token}.`);
+    return res.json({ success: true, message: "Convite cancelado com sucesso." });
+  } catch (err: any) {
+    console.error("[Admin Cancel Invite] Erro ao cancelar convite:", err);
+    return res.status(500).json({ success: false, error: "Erro interno ao cancelar convite." });
+  }
+});
+
+// Renew / extend an invite's expiration
+router.post("/invites/renew", requireAdmin, async (req: Request, res: Response) => {
+  const { token, validity } = req.body;
+  const caller = (req as any).user;
+
+  if (!token || !validity) {
+    return res.status(400).json({ success: false, error: "O token do convite e a validade são obrigatórios." });
+  }
+
+  try {
+    const db = adminDb();
+    let expiresAt: string | null = null;
+    const now = new Date();
+    if (validity === "24h") {
+      expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+    } else if (validity === "7d") {
+      expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    } else if (validity === "30d") {
+      expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    } else if (validity === "90d") {
+      expiresAt = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000).toISOString();
+    }
+
+    await db.collection("invites").doc(token).update({
+      expiresAt,
+      validity,
+      active: true,
+    });
+    console.log(`[Admin Invite Renew] ${caller.email} renovou o convite ${token} (nova validade: ${validity}).`);
+    return res.json({ success: true, message: "Convite renovado com sucesso." });
+  } catch (err: any) {
+    console.error("[Admin Renew Invite] Erro ao renovar convite:", err);
+    return res.status(500).json({ success: false, error: "Erro interno ao renovar convite." });
+  }
+});
+
+// Delete an invite record from the database
+router.delete("/invites", requireAdmin, async (req: Request, res: Response) => {
+  const { token } = req.body;
+  const caller = (req as any).user;
+
+  if (!token) {
+    return res.status(400).json({ success: false, error: "O token do convite é obrigatório." });
+  }
+
+  try {
+    const db = adminDb();
+    await db.collection("invites").doc(token).delete();
+    console.log(`[Admin Invite Delete] ${caller.email} excluiu permanentemente o registro do convite ${token}.`);
+    return res.json({ success: true, message: "Convite excluído permanentemente." });
+  } catch (err: any) {
+    console.error("[Admin Delete Invite] Erro ao excluir convite:", err);
+    return res.status(500).json({ success: false, error: "Erro interno ao excluir convite." });
+  }
+});
+
 export default router;

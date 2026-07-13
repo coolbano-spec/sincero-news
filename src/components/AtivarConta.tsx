@@ -18,6 +18,10 @@ interface AtivarContaProps {
 }
 
 export const AtivarConta: React.FC<AtivarContaProps> = ({ onGoToLogin }) => {
+  // Read invite token from URL query parameters
+  const queryParams = new URLSearchParams(window.location.search);
+  const inviteToken = queryParams.get("invite");
+
   // Fields
   const [nome, setNome] = useState("");
   const [email, setEmail] = useState("");
@@ -30,6 +34,34 @@ export const AtivarConta: React.FC<AtivarContaProps> = ({ onGoToLogin }) => {
   const [success, setSuccess] = useState<string | null>(null);
   const [showSenha, setShowSenha] = useState(false);
   const [showConfirmarSenha, setShowConfirmarSenha] = useState(false);
+  const [inviteValid, setInviteValid] = useState(true);
+
+  // Validate invite token on mount
+  React.useEffect(() => {
+    if (inviteToken) {
+      setLoading(true);
+      setError(null);
+      setSuccess(null);
+      fetch(`/api/admin/invites/validate?token=${encodeURIComponent(inviteToken)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success) {
+            setInviteValid(true);
+            setSuccess(`Convite de acesso (${data.invite.role === "admin" ? "Administrador" : "Leitor"}) validado com sucesso! Preencha os campos abaixo para ativar sua conta.`);
+          } else {
+            setInviteValid(false);
+            setError(data.error || "Este convite é inválido, expirado ou já foi utilizado.");
+          }
+        })
+        .catch((err) => {
+          console.error("[AtivarConta] Erro ao verificar convite:", err);
+          setError("Erro ao verificar convite de acesso. Tente novamente.");
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+    }
+  }, [inviteToken]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,6 +78,12 @@ export const AtivarConta: React.FC<AtivarContaProps> = ({ onGoToLogin }) => {
 
     if (senha !== confirmarSenha) {
       setError("As senhas não coincidem.");
+      return;
+    }
+
+    // Block submission if there's an invite token that is invalid
+    if (inviteToken && !inviteValid) {
+      setError("Não é possível registrar com um convite inválido ou expirado.");
       return;
     }
 
@@ -101,6 +139,32 @@ export const AtivarConta: React.FC<AtivarContaProps> = ({ onGoToLogin }) => {
             console.error("[AtivarConta] Erro crítico no fluxo de ativação:", tempErr);
             throw tempErr;
           }
+        }
+      }
+
+      if (inviteToken && userCredential?.user) {
+        try {
+          const consumeRes = await fetch("/api/admin/invites/consume", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              token: inviteToken,
+              uid: userCredential.user.uid,
+              email: emailLower,
+              nome: nome.trim(),
+            }),
+          });
+          const consumeData = await consumeRes.json();
+          if (!consumeData.success) {
+            throw new Error(consumeData.error || "Erro ao consumir convite.");
+          }
+        } catch (consumeErr: any) {
+          console.error("[AtivarConta] Erro ao consumir convite no backend:", consumeErr);
+          setError(consumeErr.message || "Erro ao registrar convite.");
+          setLoading(false);
+          return;
         }
       }
 
